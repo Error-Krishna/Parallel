@@ -1,0 +1,39 @@
+name: parallel
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: parallel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: parallel
+      POSTGRES_PASSWORD: parallel_dev_password
+      POSTGRES_DB: parallel_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - parallel_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parallel -d parallel_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: parallel-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - parallel_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  parallel_postgres_data:
+  parallel_redis_data:

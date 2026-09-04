@@ -1,0 +1,24 @@
+{
+  "name": "@parallel/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared DTOs / API contract types between apps/web, apps/api, and apps/mobile.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
+  }
+}

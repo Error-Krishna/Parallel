@@ -1,0 +1,29 @@
+{
+  "name": "@parallel/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared design-system components, promoted here once genuinely reused across apps/web and apps/mobile. Day-to-day shadcn/ui primitives live in apps/web/src/components until then — see apps/web/CLAUDE.md.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "react": "19.2.8",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
+  }
+}

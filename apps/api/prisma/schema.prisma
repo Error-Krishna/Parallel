@@ -1,0 +1,380 @@
+// Parallel — Prisma schema
+// See PARALLEL_master_blueprint_final.md §13 for the entity-relationship rationale.
+// This is the Phase 4/5 starting schema — expect it to evolve as the Identity Engine
+// (Phase 6) and Social (Phase 7) modules get built out.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector", schema: "public")]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Users & onboarding
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  avatarUrl    String?  @map("avatar_url")
+  bio          String?
+  visibilitySettings Json @default("{}") @map("visibility_settings")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  onboardingResponses OnboardingResponse[]
+  interestSignals     InterestSignal[]
+  parallels           UserParallel[]
+  evolutionSnapshots  ParallelEvolutionSnapshot[]
+  questProgress       UserQuestProgress[]
+  identityCards       IdentityCard[]
+  notifications       Notification[]
+
+  followedBy  Follow[] @relation("followee")
+  following   Follow[] @relation("follower")
+
+  twinAsA Twin[] @relation("twinUserA")
+  twinAsB Twin[] @relation("twinUserB")
+
+  communityMemberships CommunityMember[]
+
+  collabAsA CollabSession[] @relation("collabUserA")
+  collabAsB CollabSession[] @relation("collabUserB")
+
+  rouletteAsA RouletteMatch[] @relation("rouletteUserA")
+  rouletteAsB RouletteMatch[] @relation("rouletteUserB")
+
+  @@map("users")
+}
+
+model OnboardingResponse {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionKey  String   @map("question_key")
+  answerValue  String   @map("answer_value")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("onboarding_responses")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Data flywheel — the raw behavioral event log (blueprint §21)
+// ─────────────────────────────────────────────────────────────
+
+enum SignalType {
+  VIEW
+  LIKE
+  SAVE
+  SEARCH
+  FOLLOW
+  CHALLENGE_COMPLETE
+  SHARE
+  QUEST_STEP
+}
+
+model InterestSignal {
+  id         String     @id @default(cuid())
+  userId     String     @map("user_id")
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signalType SignalType @map("signal_type")
+  targetType String     @map("target_type") // e.g. "content_item", "parallel_type", "quest"
+  targetId   String     @map("target_id")
+  weight     Float      @default(1.0)
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("interest_signals")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity Engine — Parallel types, the user's map, evolution
+// ─────────────────────────────────────────────────────────────
+
+model ParallelType {
+  id                 String   @id @default(cuid())
+  name               String   @unique // "Builder", "Music Head", "The Urbanist"...
+  description        String
+  icon               String?
+  isSystemGenerated  Boolean  @default(true) @map("is_system_generated")
+  createdByUserId    String?  @map("created_by_user_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  userParallels       UserParallel[]
+  evolutionSnapshots  ParallelEvolutionSnapshot[]
+  quests              Quest[]
+  contentItems        ContentItem[]
+  events              RealWorldEvent[]
+
+  @@map("parallel_types")
+}
+
+model UserParallel {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parallelTypeId     String   @map("parallel_type_id")
+  parallelType       ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+
+  strengthPct        Float    @default(0) @map("strength_pct")
+  momentum           Float    @default(0) // signed delta since last recompute
+  streakCount        Int      @default(0) @map("streak_count")
+  streakLastTouchedAt DateTime? @map("streak_last_touched_at")
+
+  isGhost            Boolean  @default(true) @map("is_ghost") // privacy default — see blueprint §4.5 / §22
+  isHidden           Boolean  @default(false) @map("is_hidden")
+  suggestionReason   String?  @map("suggestion_reason") // plain-language "why" — required for explainability (§22)
+
+  discoveredAt       DateTime @default(now()) @map("discovered_at")
+
+  // pgvector embedding of this user's interest signature within this Parallel.
+  // Prisma doesn't yet have a native `vector` scalar in the stable client, so it's
+  // represented as Unsupported here — query/index it with raw SQL (see migration notes
+  // in apps/api/README.md). Dimension should match the embedding model in use (blueprint §10.3).
+  embedding          Unsupported("vector(1536)")?
+
+  @@unique([userId, parallelTypeId])
+  @@index([userId])
+  @@map("user_parallels")
+}
+
+model ParallelEvolutionSnapshot {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parallelTypeId String   @map("parallel_type_id")
+  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  strengthPct    Float    @map("strength_pct")
+  capturedAt     DateTime @default(now()) @map("captured_at")
+
+  @@index([userId, capturedAt])
+  @@map("parallel_evolution_snapshots")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Quests & streaks (blueprint §4.2, §9 original)
+// ─────────────────────────────────────────────────────────────
+
+enum QuestRewardType {
+  BADGE
+  COSMETIC_FRAME
+  HIDDEN_PARALLEL_HINT
+}
+
+model Quest {
+  id             String   @id @default(cuid())
+  parallelTypeId String   @map("parallel_type_id")
+  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  title          String
+  description    String
+  steps          Json     // ordered array of step definitions
+  rewardType     QuestRewardType @map("reward_type")
+  rewardValue    String   @map("reward_value")
+  season         String?
+  isAiGenerated  Boolean  @default(false) @map("is_ai_generated")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  progress UserQuestProgress[]
+
+  @@index([parallelTypeId])
+  @@map("quests")
+}
+
+enum QuestStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model UserQuestProgress {
+  id           String      @id @default(cuid())
+  userId       String      @map("user_id")
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questId      String      @map("quest_id")
+  quest        Quest       @relation(fields: [questId], references: [id], onDelete: Cascade)
+  status       QuestStatus @default(NOT_STARTED)
+  currentStep  Int         @default(0) @map("current_step")
+  startedAt    DateTime?   @map("started_at")
+  completedAt  DateTime?   @map("completed_at")
+
+  @@unique([userId, questId])
+  @@map("user_quest_progress")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Feed content
+// ─────────────────────────────────────────────────────────────
+
+enum ContentType {
+  POST
+  ARTICLE
+  EVENT
+  CHALLENGE_PROMPT
+}
+
+model ContentItem {
+  id             String      @id @default(cuid())
+  parallelTypeId String      @map("parallel_type_id")
+  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  type           ContentType
+  payload        Json
+  embedding      Unsupported("vector(1536)")?
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  @@index([parallelTypeId])
+  @@map("content_items")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Social — follows, twins, communities, collab, roulette
+// ─────────────────────────────────────────────────────────────
+
+model Follow {
+  followerId String   @map("follower_id")
+  followeeId String   @map("followee_id")
+  follower   User     @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followee   User     @relation("followee", fields: [followeeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@id([followerId, followeeId])
+  @@map("follows")
+}
+
+model Twin {
+  id                    String   @id @default(cuid())
+  userAId               String   @map("user_a_id")
+  userA                 User     @relation("twinUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId               String   @map("user_b_id")
+  userB                 User     @relation("twinUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  sharedParallelTypeIds Json     @map("shared_parallel_type_ids")
+  similarityScore       Float    @map("similarity_score")
+  computedAt            DateTime @default(now()) @map("computed_at")
+
+  @@unique([userAId, userBId])
+  @@map("parallel_twins")
+}
+
+model Community {
+  id                        String   @id @default(cuid())
+  name                      String
+  description               String
+  originatingParallelTypeIds Json    @map("originating_parallel_type_ids")
+  autoGenerated              Boolean @default(false) @map("auto_generated")
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  members CommunityMember[]
+
+  @@map("communities")
+}
+
+model CommunityMember {
+  communityId String    @map("community_id")
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+
+  @@id([communityId, userId])
+  @@map("community_members")
+}
+
+model RealWorldEvent {
+  id             String   @id @default(cuid())
+  parallelTypeId String   @map("parallel_type_id")
+  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  title          String
+  // PostGIS point deferred until real-world discovery (blueprint §17) is built —
+  // stored as plain lat/lng for now, matches blueprint's "if introduced" framing for PostGIS.
+  latitude       Float?
+  longitude      Float?
+  startsAt       DateTime @map("starts_at")
+  sourceUrl      String?  @map("source_url")
+
+  @@index([parallelTypeId])
+  @@map("real_world_events")
+}
+
+enum CollabStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model CollabSession {
+  id               String       @id @default(cuid())
+  userAId          String       @map("user_a_id")
+  userA            User         @relation("collabUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId          String       @map("user_b_id")
+  userB            User         @relation("collabUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  parallelTypeAId  String       @map("parallel_type_a_id")
+  parallelTypeBId  String       @map("parallel_type_b_id")
+  status           CollabStatus @default(PENDING)
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  @@map("collab_sessions")
+}
+
+enum RouletteStatus {
+  QUEUED
+  MATCHED
+  ENDED
+}
+
+model RouletteMatch {
+  id                    String         @id @default(cuid())
+  userAId               String         @map("user_a_id")
+  userA                 User           @relation("rouletteUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId               String?        @map("user_b_id")
+  userB                 User?          @relation("rouletteUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  matchedParallelContext String?       @map("matched_parallel_context")
+  status                RouletteStatus @default(QUEUED)
+  startedAt             DateTime       @default(now()) @map("started_at")
+  endedAt                DateTime?     @map("ended_at")
+
+  @@map("roulette_matches")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Growth mechanics — Identity Cards, Wrapped, notifications
+// ─────────────────────────────────────────────────────────────
+
+enum IdentityCardType {
+  PARALLEL
+  QUEST
+  WRAPPED
+  TWIN
+}
+
+model IdentityCard {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardType  IdentityCardType @map("card_type")
+  imageUrl  String           @map("image_url")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("identity_cards")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  payload   Json
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}

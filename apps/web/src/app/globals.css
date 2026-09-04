@@ -1,26 +1,63 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --border: #e4e4e7;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --radius: 0.75rem;
+
+  /* Per-Parallel accent colors (blueprint §14 — each Parallel gets a distinct
+     color + motion signature so switching contexts feels different). Expand this
+     set as new Parallel types are added; keep names semantic, not positional. */
+  --parallel-builder: #f59e0b;
+  --parallel-music-head: #ec4899;
+  --parallel-gamer: #22c55e;
+  --parallel-explorer: #3b82f6;
+  --parallel-urbanist: #a855f7;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #101012;
+  --card-foreground: #fafafa;
+  --border: #27272a;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
+  --primary: #a78bfa;
+  --primary-foreground: #09090b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-parallel-builder: var(--parallel-builder);
+  --color-parallel-music-head: var(--parallel-music-head);
+  --color-parallel-gamer: var(--parallel-gamer);
+  --color-parallel-explorer: var(--parallel-explorer);
+  --color-parallel-urbanist: var(--parallel-urbanist);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-lg: var(--radius);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

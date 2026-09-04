@@ -1,14 +1,33 @@
 {
-  "name": "Parallel",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "parallel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Social identity-discovery platform — explore different versions of yourself.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "prepare": "husky"
   },
-  "keywords": [],
+  "lint-staged": {
+    "apps/web/**/*.{ts,tsx}": [
+      "pnpm --filter web exec eslint --fix"
+    ],
+    "apps/api/**/*.ts": [
+      "pnpm --filter api exec oxlint"
+    ],
+    "**/*.{md,json,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "keywords": [
+    "parallel",
+    "identity",
+    "social-discovery"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "devEngines": {
     "packageManager": {
       "name": "pnpm",

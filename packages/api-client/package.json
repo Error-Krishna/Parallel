@@ -1,0 +1,33 @@
+{
+  "name": "@parallel/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed API client + TanStack Query hooks over the Parallel API, built on @parallel/shared-types.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@parallel/shared-types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5",
+    "axios": "^1"
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.102.8",
+    "axios": "^1.20.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3"
+  }
+}
