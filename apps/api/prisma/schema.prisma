@@ -35,6 +35,7 @@ model User {
   evolutionSnapshots  ParallelEvolutionSnapshot[]
   questProgress       UserQuestProgress[]
   identityCards       IdentityCard[]
+  wrappedRecaps       ParallelWrapped[]
   notifications       Notification[]
 
   followedBy  Follow[] @relation("followee")
@@ -79,6 +80,7 @@ enum SignalType {
   CHALLENGE_COMPLETE
   SHARE
   QUEST_STEP
+  COMMUNITY_JOIN
 }
 
 model InterestSignal {
@@ -113,6 +115,9 @@ model ParallelType {
   quests              Quest[]
   contentItems        ContentItem[]
   events              RealWorldEvent[]
+  collabSessionsAsA   CollabSession[] @relation("collabParallelTypeA")
+  collabSessionsAsB   CollabSession[] @relation("collabParallelTypeB")
+  rouletteMatches     RouletteMatch[]
 
   @@map("parallel_types")
 }
@@ -130,7 +135,8 @@ model UserParallel {
   streakLastTouchedAt DateTime? @map("streak_last_touched_at")
 
   isGhost            Boolean  @default(true) @map("is_ghost") // privacy default — see blueprint §4.5 / §22
-  isHidden           Boolean  @default(false) @map("is_hidden")
+  isHidden           Boolean  @default(false) @map("is_hidden") // reversible — user can un-hide from Profile > My Parallels
+  dismissedAt        DateTime? @map("dismissed_at") // permanent reject/remove (suggestion-time reject in Flow 3a, or later removal in Flow 14) — soft delete; Identity Engine must not re-suggest this (user, parallelType) pair while set
   suggestionReason   String?  @map("suggestion_reason") // plain-language "why" — required for explainability (§22)
 
   discoveredAt       DateTime @default(now()) @map("discovered_at")
@@ -316,7 +322,9 @@ model CollabSession {
   userBId          String       @map("user_b_id")
   userB            User         @relation("collabUserB", fields: [userBId], references: [id], onDelete: Cascade)
   parallelTypeAId  String       @map("parallel_type_a_id")
+  parallelTypeA    ParallelType @relation("collabParallelTypeA", fields: [parallelTypeAId], references: [id], onDelete: Cascade)
   parallelTypeBId  String       @map("parallel_type_b_id")
+  parallelTypeB    ParallelType @relation("collabParallelTypeB", fields: [parallelTypeBId], references: [id], onDelete: Cascade)
   status           CollabStatus @default(PENDING)
   createdAt        DateTime     @default(now()) @map("created_at")
 
@@ -335,7 +343,9 @@ model RouletteMatch {
   userA                 User           @relation("rouletteUserA", fields: [userAId], references: [id], onDelete: Cascade)
   userBId               String?        @map("user_b_id")
   userB                 User?          @relation("rouletteUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  matchedParallelContext String?       @map("matched_parallel_context")
+  parallelTypeId        String?        @map("parallel_type_id") // the Parallel the queuing user picked (Flow 13) — the actual match intersection
+  parallelType          ParallelType?  @relation(fields: [parallelTypeId], references: [id], onDelete: SetNull)
+  matchedParallelContext String?       @map("matched_parallel_context") // free-text note on the specific intersection found, if any
   status                RouletteStatus @default(QUEUED)
   startedAt             DateTime       @default(now()) @map("started_at")
   endedAt                DateTime?     @map("ended_at")
@@ -352,17 +362,54 @@ enum IdentityCardType {
   QUEST
   WRAPPED
   TWIN
+  COLLAB
+}
+
+enum WrappedPeriod {
+  MONTHLY
+  ANNUAL
+}
+
+model ParallelWrapped {
+  id          String        @id @default(cuid())
+  userId      String        @map("user_id")
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period      WrappedPeriod
+  periodStart DateTime      @map("period_start")
+  periodEnd   DateTime      @map("period_end")
+
+  // Structured highlights computed by the Wrapped generation job (blueprint §8/§16 Phase 9):
+  // { biggestEvolution: { parallelTypeId, deltaPct }, mostExplored: { parallelTypeId, interactionCount },
+  //   weirdestIntersection: { parallelTypeIds[], note }, streakHighlight: { parallelTypeId, streakCount },
+  //   twinId: string | null, narrativeCopy: string (Claude-generated, blueprint §10.3) }
+  // Kept as Json rather than rigid columns since the highlight set is expected to grow (blueprint §4.3).
+  highlights  Json
+
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  @@index([userId, periodStart])
+  @@map("parallel_wrapped")
 }
 
 model IdentityCard {
-  id        String           @id @default(cuid())
-  userId    String           @map("user_id")
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cardType  IdentityCardType @map("card_type")
-  imageUrl  String           @map("image_url")
-  createdAt DateTime         @default(now()) @map("created_at")
+  id         String           @id @default(cuid())
+  userId     String           @map("user_id")
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardType   IdentityCardType @map("card_type")
+
+  // Polymorphic reference back to whatever triggered this card — a UserParallel.id (PARALLEL),
+  // Quest.id (QUEST), ParallelWrapped.id (WRAPPED), Twin.id (TWIN), or CollabSession.id (COLLAB).
+  // Same loose-reference pattern as InterestSignal.targetType/targetId — kept nullable since a
+  // card can theoretically be regenerated/re-rendered without a live source (e.g. after the
+  // source row is deleted) without breaking the FK.
+  sourceType String?          @map("source_type")
+  sourceId   String?          @map("source_id")
+
+  imageUrl   String           @map("image_url")
+  createdAt  DateTime         @default(now()) @map("created_at")
 
   @@index([userId])
+  @@index([sourceType, sourceId])
   @@map("identity_cards")
 }
 

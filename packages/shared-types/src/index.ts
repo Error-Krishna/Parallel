@@ -27,6 +27,7 @@ export interface UserParallelDto {
   streakCount: number;
   isGhost: boolean;
   isHidden: boolean;
+  dismissedAt: string | null; // set = permanently rejected/removed (see DATABASE.md §2.3); null = active/suggested
   suggestionReason: string | null;
   discoveredAt: string; // ISO date string over the wire
 }
@@ -39,6 +40,47 @@ export interface ParallelMapResponse {
 export interface OnboardingAnswerDto {
   questionKey: string;
   answerValue: string;
+}
+
+// Matches IdentityCardType in schema.prisma — keep in sync.
+export type IdentityCardType = 'PARALLEL' | 'QUEST' | 'WRAPPED' | 'TWIN' | 'COLLAB';
+
+export interface IdentityCardDto {
+  id: string;
+  cardType: IdentityCardType;
+  sourceType: string | null;
+  sourceId: string | null;
+  imageUrl: string;
+  createdAt: string;
+}
+
+export interface CreateIdentityCardDto {
+  cardType: IdentityCardType;
+  sourceId: string;
+}
+
+// Matches WrappedPeriod in schema.prisma.
+export type WrappedPeriod = 'MONTHLY' | 'ANNUAL';
+
+// Mirrors the shape of ParallelWrapped.highlights (see DATABASE.md §2.7 / schema.prisma comment) —
+// kept as a distinct interface here (rather than `unknown`/`Json`) so the frontend gets real
+// autocomplete on Wrapped fields. Update both places together if the highlight set changes.
+export interface WrappedHighlights {
+  biggestEvolution: { parallelTypeId: string; deltaPct: number } | null;
+  mostExplored: { parallelTypeId: string; interactionCount: number } | null;
+  weirdestIntersection: { parallelTypeIds: string[]; note: string } | null;
+  streakHighlight: { parallelTypeId: string; streakCount: number } | null;
+  twinId: string | null;
+  narrativeCopy: string;
+}
+
+export interface WrappedRecapDto {
+  id: string;
+  period: WrappedPeriod;
+  periodStart: string;
+  periodEnd: string;
+  highlights: WrappedHighlights;
+  createdAt: string;
 }
 
 export interface HealthResponse {
