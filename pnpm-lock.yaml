@@ -319,7 +319,7 @@ importers:
         version: link:../../packages/shared-types
       "@prisma/client":
         specifier: ^6.19.0
-        version: 6.19.3(prisma@6.19.3(typescript@6.0.3))(typescript@6.0.3)
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       bcryptjs:
         specifier: ^3.0.2
         version: 3.0.3
@@ -368,7 +368,7 @@ importers:
         version: 0.2.6
       "@nestjs/schematics":
         specifier: ^12.0.0
-        version: 12.0.0(chokidar@5.0.0)(prettier@3.9.6)(typescript@6.0.3)
+        version: 12.0.0(chokidar@5.0.0)(prettier@3.9.6)(typescript@5.9.3)
       "@nestjs/testing":
         specifier: ^12.0.1
         version: 12.0.1(@nestjs/common@12.0.1(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.1)(@nestjs/platform-express@12.0.1)
@@ -398,7 +398,7 @@ importers:
         version: 3.9.6
       prisma:
         specifier: ^6.19.0
-        version: 6.19.3(typescript@6.0.3)
+        version: 6.19.3(typescript@5.9.3)
       source-map-support:
         specifier: ^0.5.21
         version: 0.5.21
@@ -406,11 +406,11 @@ importers:
         specifier: ^7.0.0
         version: 7.2.2(supports-color@7.2.0)
       typescript:
-        specifier: ^6.0.2
-        version: 6.0.3
+        specifier: ^5.9.3
+        version: 5.9.3
       vite-tsconfig-paths:
         specifier: ^5.1.4
-        version: 5.1.4(supports-color@7.2.0)(typescript@6.0.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
+        version: 5.1.4(supports-color@7.2.0)(typescript@5.9.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
       vitest:
         specifier: ^4.1.2
         version: 4.1.11(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
@@ -10122,6 +10122,19 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  "@nestjs/schematics@12.0.0(chokidar@5.0.0)(prettier@3.9.6)(typescript@5.9.3)":
+    dependencies:
+      "@angular-devkit/core": 22.1.5(chokidar@5.0.0)
+      "@angular-devkit/schematics": 22.1.5(chokidar@5.0.0)
+      comment-json: 5.0.0
+      jsonc-parser: 3.3.1
+      pluralize: 8.0.0
+      typescript: 5.9.3
+    optionalDependencies:
+      prettier: 3.9.6
+    transitivePeerDependencies:
+      - chokidar
+
   "@nestjs/schematics@12.0.0(chokidar@5.0.0)(prettier@3.9.6)(typescript@6.0.3)":
     dependencies:
       "@angular-devkit/core": 22.1.5(chokidar@5.0.0)
@@ -10273,10 +10286,10 @@ snapshots:
     dependencies:
       playwright: 1.62.1
 
-  "@prisma/client@6.19.3(prisma@6.19.3(typescript@6.0.3))(typescript@6.0.3)":
+  "@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)":
     optionalDependencies:
-      prisma: 6.19.3(typescript@6.0.3)
-      typescript: 6.0.3
+      prisma: 6.19.3(typescript@5.9.3)
+      typescript: 5.9.3
 
   "@prisma/config@6.19.3":
     dependencies:
@@ -13397,12 +13410,12 @@ snapshots:
       ansi-styles: 5.2.0
       react-is: 17.0.2
 
-  prisma@6.19.3(typescript@6.0.3):
+  prisma@6.19.3(typescript@5.9.3):
     dependencies:
       "@prisma/config": 6.19.3
       "@prisma/engines": 6.19.3
     optionalDependencies:
-      typescript: 6.0.3
+      typescript: 5.9.3
     transitivePeerDependencies:
       - magicast
 
@@ -14073,9 +14086,9 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  tsconfck@3.1.6(typescript@6.0.3):
+  tsconfck@3.1.6(typescript@5.9.3):
     optionalDependencies:
-      typescript: 6.0.3
+      typescript: 5.9.3
 
   tsconfig-paths@3.15.0:
     dependencies:
@@ -14303,11 +14316,11 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite-tsconfig-paths@5.1.4(supports-color@7.2.0)(typescript@6.0.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)):
+  vite-tsconfig-paths@5.1.4(supports-color@7.2.0)(typescript@5.9.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)):
     dependencies:
       debug: 4.4.3(supports-color@7.2.0)
       globrex: 0.1.2
-      tsconfck: 3.1.6(typescript@6.0.3)
+      tsconfck: 3.1.6(typescript@5.9.3)
     optionalDependencies:
       vite: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)
     transitivePeerDependencies:
