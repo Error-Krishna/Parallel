@@ -8,7 +8,8 @@ import { DatabaseModule } from './database/database.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { RedisProviderModule } from './jobs/redis.provider.js';
 import { HealthModule } from './modules/health/health.module.js';
-import { TodosModule } from './modules/todos/todos.module.js'; // DISPOSABLE — delete once the NestJS pattern feels natural (see todos.module.ts)
+import { AuthModule } from './modules/auth/auth.module.js';
+import { UsersModule } from './modules/users/users.module.js';
 
 @Module({
   imports: [
@@ -30,11 +31,12 @@ import { TodosModule } from './modules/todos/todos.module.js'; // DISPOSABLE —
     JobsModule,
     RedisProviderModule,
     HealthModule,
-    TodosModule, // DISPOSABLE — learning exercise, not a real feature (blueprint Phase 4 ramp)
+    AuthModule,
+    UsersModule,
     // Feature modules land here as they're built (blueprint §16):
-    // AuthModule, UsersModule, OnboardingModule, IdentityEngineModule, ParallelsModule,
-    // QuestsModule, FeedModule, SocialModule, CommunitiesModule, EventsModule,
-    // WrappedModule, CardsModule, NotificationsModule, AdminModule.
+    // OnboardingModule, IdentityEngineModule, ParallelsModule, QuestsModule, FeedModule,
+    // SocialModule, CommunitiesModule, EventsModule, WrappedModule, CardsModule,
+    // NotificationsModule, AdminModule.
   ],
   controllers: [AppController],
   providers: [AppService],

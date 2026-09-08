@@ -29,27 +29,28 @@
 
 ## 2. Already implemented
 
-| Method | Path         | Auth | Description                                                                                                                |
-| ------ | ------------ | ---- | -------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/v1`        | —    | Root status check — `{ "name": "Parallel API", "status": "running" }`                                                      |
-| `GET`  | `/v1/health` | —    | Pings Postgres + Redis, returns `HealthResponse` (see `shared-types`) — used by deploy/monitoring, not by the frontend app |
+| Method  | Path                  | Auth | Description                                                                                                                |
+| ------- | --------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET`   | `/v1`                 | —    | Root status check — `{ "name": "Parallel API", "status": "running" }`                                                      |
+| `GET`   | `/v1/health`          | —    | Pings Postgres + Redis, returns `HealthResponse` (see `shared-types`) — used by deploy/monitoring, not by the frontend app |
+| `POST`  | `/v1/auth/signup`     | —    | Create an account. `SignupDto { email, username, password }` → `{ user: PublicUser, accessToken }`                         |
+| `POST`  | `/v1/auth/login`      | —    | `LoginDto { email, password }` → `{ user: PublicUser, accessToken }`                                                       |
+| `POST`  | `/v1/auth/logout`     | 🔒   | `204` — stateless JWT, client discards the token                                                                           |
+| `GET`   | `/v1/users/me`        | 🔒   | → `PublicUser`                                                                                                             |
+| `PATCH` | `/v1/users/me`        | 🔒   | `UpdateUserDto` (partial) → `PublicUser`                                                                                   |
+| `GET`   | `/v1/users/:username` | 🔒   | → `PublicUser`                                                                                                             |
 
-The `TodosModule` (`/v1/todos`) is a disposable learning scaffold — **not part of the real API surface**, delete it (and this note) once removed per `apps/api/src/modules/todos/todos.module.ts`.
+Everything else in this document below §3 is spec, not yet built — update this table as each module ships.
 
 ---
 
-## 3. Auth (Phase 5 — `modules/auth`, `modules/users`)
+## 3. Auth (`modules/auth`, `modules/users`) — ✅ implemented
 
-| Method  | Path                  | Auth | Request                                                        | Response                                                                                                                  |
-| ------- | --------------------- | ---- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `POST`  | `/v1/auth/signup`     | —    | `{ email, username, password }`                                | `{ user: PublicUser, accessToken }`                                                                                       |
-| `POST`  | `/v1/auth/login`      | —    | `{ email, password }`                                          | `{ user: PublicUser, accessToken }`                                                                                       |
-| `POST`  | `/v1/auth/logout`     | 🔒   | —                                                              | `204 No Content` (client discards token; consider a token-blocklist in Redis if immediate server-side revocation matters) |
-| `GET`   | `/v1/users/me`        | 🔒   | —                                                              | `PublicUser`                                                                                                              |
-| `PATCH` | `/v1/users/me`        | 🔒   | partial `{ username?, bio?, avatarUrl?, visibilitySettings? }` | `PublicUser`                                                                                                              |
-| `GET`   | `/v1/users/:username` | 🔒   | —                                                              | `PublicUser` (public-facing subset only)                                                                                  |
+Endpoints listed in §2 above. Hashing: **bcryptjs** (pure JS, 12 salt rounds) — chosen over `argon2`/`bcrypt` specifically to avoid native-module build friction in this monorepo (same class of issue as the Prisma CLI note in `apps/api/CLAUDE.md`). Passwords are never logged or returned in any response — `UsersService.toPublicUser()` strips both `passwordHash` and `email` before anything reaches a controller response.
 
-Passwords hashed with `argon2` or `bcrypt` (pick one, document the choice here once implemented) — never stored or logged in plain text, never returned in any response.
+Tokens: JWT via `@nestjs/jwt`, `Authorization: Bearer <token>`, secret/expiry from `JWT_SECRET`/`JWT_EXPIRES_IN` (`apps/api/.env`). Verified per-request by `JwtStrategy` (`modules/auth/strategies/jwt.strategy.ts`) and enforced with `@UseGuards(JwtAuthGuard)` — see `UsersController` for the pattern to copy in every future protected controller. The decoded payload becomes `request.user`, retrievable in any controller via the `@CurrentUser()` decorator (`common/decorators/current-user.decorator.ts`).
+
+Same error message ("Invalid email or password") for both a nonexistent email and a wrong password — deliberate, prevents account enumeration.
 
 ---
 
