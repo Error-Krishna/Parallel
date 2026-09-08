@@ -58,7 +58,7 @@ jobs:
         run: pnpm turbo run lint
 
       - name: Apply database migrations
-        run: pnpm --filter api prisma migrate deploy
+        run: pnpm --filter api exec prisma migrate deploy
 
       - name: Build
         run: pnpm turbo run build
