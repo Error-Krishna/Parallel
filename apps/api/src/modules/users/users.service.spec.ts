@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
+import { Prisma } from '@prisma/client';
 
 // PrismaService is mocked here — this is a *unit* test (fast, no real DB). Integration
 // tests against a real Postgres instance belong in test:e2e (see apps/api/CLAUDE.md).
@@ -47,10 +48,25 @@ describe('UsersService', () => {
   });
 
   it('rejects signup with a duplicate email', async () => {
-    prisma.user.findUnique.mockResolvedValueOnce({ id: 'existing' }); // findByEmail hit
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.0',
+          meta: {
+            target: ['email'],
+          },
+        },
+      ),
+    );
 
     await expect(
-      service.create({ email: 'taken@example.com', username: 'newname', passwordHash: 'x' }),
+      service.create({
+        email: 'taken@example.com',
+        username: 'newname',
+        passwordHash: 'x',
+      }),
     ).rejects.toThrow(ConflictException);
   });
 

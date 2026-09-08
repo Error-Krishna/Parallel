@@ -13,6 +13,8 @@ import type { FastifyRequest } from 'fastify';
 // remaining lifetime. Look up anything beyond `id` via UsersService when needed.
 export interface AuthenticatedUser {
   id: string;
+  jti: string;
+  exp: number;
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthenticatedUser => {

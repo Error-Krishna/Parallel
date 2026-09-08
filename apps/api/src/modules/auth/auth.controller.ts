@@ -1,30 +1,39 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthService } from './auth.service.js';
+import { apiResponse } from '../../common/utils/api-response.js';
 import { SignupDto } from './dto/signup.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
+import {
+  CurrentUser,
+  type AuthenticatedUser,
+} from '../../common/decorators/current-user.decorator.js';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('signup')
-  signup(@Body() dto: SignupDto) {
-    return this.authService.signup(dto);
+  async signup(@Body() dto: SignupDto) {
+    const result = await this.authService.signup(dto);
+    return apiResponse(result, 'Account created successfully');
   }
 
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto) {
+    const result = await this.authService.login(dto);
+    return apiResponse(result, 'Login successful');
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  logout() {
-    // Stateless JWT: the client just discards the token. Revisit with a Redis-backed
-    // token blocklist (keyed on jti, TTL = remaining token life) if immediate
-    // server-side revocation becomes a real requirement — see API.md §3.
-    return;
+  async logout(@CurrentUser() currentUser: AuthenticatedUser) {
+    await this.authService.logout(currentUser);
+    return apiResponse(null, 'User logged out successfully');
   }
 }

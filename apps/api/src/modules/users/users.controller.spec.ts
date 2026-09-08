@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
 import { UsersController } from './users.controller.js';
 import { UsersService } from './users.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -53,24 +52,39 @@ describe('UsersController', () => {
   it('getMe returns the current user as a PublicUser', async () => {
     const result = await controller.getMe(currentUser);
     expect(usersService.findById).toHaveBeenCalledWith('1');
-    expect(result).toEqual(fakePublicUser);
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile fetched successfully',
+      data: fakePublicUser,
+    });
   });
 
   it('updateMe passes the DTO through to the service', async () => {
     const dto = { bio: 'new bio' };
     const result = await controller.updateMe(currentUser, dto);
     expect(usersService.updateProfile).toHaveBeenCalledWith('1', dto);
-    expect(result).toEqual(fakePublicUser);
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile updated successfully',
+      data: fakePublicUser,
+    });
   });
 
   it('getByUsername returns a PublicUser when found', async () => {
     usersService.findByUsername.mockResolvedValue(fakeUserRow);
     const result = await controller.getByUsername('alex');
-    expect(result).toEqual(fakePublicUser);
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile fetched successfully',
+      data: fakePublicUser,
+    });
   });
 
   it('getByUsername throws NotFoundException when the user does not exist', async () => {
     usersService.findByUsername.mockResolvedValue(null);
-    await expect(controller.getByUsername('nobody')).rejects.toThrow(NotFoundException);
+    await expect(controller.getByUsername('nobody')).rejects.toMatchObject({
+      message: 'User not found',
+      status: 404,
+    });
   });
 });

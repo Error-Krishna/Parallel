@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service.js';
 import { UsersService } from '../users/users.service.js';
 import { JwtService } from '@nestjs/jwt';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -30,6 +31,12 @@ describe('AuthService', () => {
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: { sign: vi.fn(() => 'fake.jwt.token') } },
+        {
+          provide: REDIS_CLIENT,
+          useValue: {
+            set: vi.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -1,13 +1,21 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'node:crypto';
+import { Redis } from 'ioredis';
 import * as bcrypt from 'bcryptjs';
 import type { User } from '@prisma/client';
 import type { PublicUser } from '@parallel/shared-types';
 import { UsersService } from '../users/users.service.js';
 import type { SignupDto } from './dto/signup.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
+import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator.js';
 
-const BCRYPT_SALT_ROUNDS = 12;
+const BCRYPT_SALT_ROUNDS = 10;
 
 export interface AuthResult {
   user: PublicUser;
@@ -19,15 +27,21 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   async signup(dto: SignupDto): Promise<AuthResult> {
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
-    // UsersService.create() already checks for existing email/username and throws
-    // ConflictException — nothing else to duplicate here.
+    const email = dto.email.trim().toLowerCase();
+    const username = dto.username.trim().toLowerCase();
+
+    const passwordHash = await bcrypt.hash(
+      dto.password,
+      BCRYPT_SALT_ROUNDS,
+    );
+
     const user = await this.usersService.create({
-      email: dto.email,
-      username: dto.username,
+      email,
+      username,
       passwordHash,
     });
 
@@ -35,14 +49,19 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {
-    const user = await this.usersService.findByEmail(dto.email);
-    // Deliberately the same error for "no such email" and "wrong password" — never
-    // reveal which one was wrong (standard auth hygiene, prevents email enumeration).
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.usersService.findByEmail(email);
+
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
+
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -50,10 +69,26 @@ export class AuthService {
     return this.buildAuthResult(user);
   }
 
+  async logout(user: AuthenticatedUser): Promise<void> {
+    const remainingSeconds =
+      user.exp - Math.floor(Date.now() / 1000);
+
+    if (remainingSeconds <= 0) {
+      return;
+    }
+
+    await this.redis.set(
+      `auth:revoked:${user.jti}`,
+      '1',
+      'EX',
+      remainingSeconds,
+    );
+  }
+
   private buildAuthResult(user: User): AuthResult {
     const accessToken = this.jwtService.sign({
       sub: user.id,
-      username: user.username,
+      jti: randomUUID(),
     });
 
     return {

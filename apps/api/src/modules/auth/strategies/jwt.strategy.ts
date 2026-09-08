@@ -1,38 +1,88 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
+import { Inject } from '@nestjs/common';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Redis } from 'ioredis';
 import type { AppConfig } from '../../../config/configuration.js';
+import { REDIS_CLIENT } from '../../../jobs/redis.provider.js';
 import type { AuthenticatedUser } from '../../../common/decorators/current-user.decorator.js';
 
 interface JwtPayload {
-  sub: string;
+  sub?: unknown;
+  jti?: unknown;
+  exp?: unknown;
 }
 
-// Passport strategies are how NestJS's auth guards actually verify a token: this
-// class tells passport-jwt *how* to extract and verify the token (via the constructor
-// config below), and *what to attach to the request* once it's verified (the return
-// value of validate() becomes `request.user` — see CurrentUser decorator).
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(config: ConfigService) {
-    const { jwt } = config.get<AppConfig>('app')!;
+  constructor(
+    config: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {
+    const appConfig = config.get<AppConfig>('app');
+
+    if (!appConfig) {
+      throw new Error('Application configuration is unavailable');
+    }
+
+    const { jwt } = appConfig;
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: jwt.secret,
-      // Rejects a token that's structurally valid and correctly signed but wasn't
-      // actually meant for this app (e.g. issued by a different environment sharing
-      // an accidentally-reused secret) — an extra check beyond the signature alone.
       issuer: jwt.issuer,
       audience: jwt.audience,
     });
   }
 
-  // Called automatically once the token's signature, expiry, issuer, and audience all
-  // check out. Kept deliberately thin — a DB lookup here would run on every single
-  // authenticated request; the token payload already has everything CurrentUser needs.
-  validate(payload: JwtPayload): AuthenticatedUser {
-    return { id: payload.sub };
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    if (
+      typeof payload.sub !== 'string' ||
+      payload.sub.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.jti !== 'string' ||
+      payload.jti.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.exp !== 'number' ||
+      !Number.isFinite(payload.exp)
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    try {
+      const revoked = await this.redis.exists(`auth:revoked:${payload.jti}`);
+
+      if (revoked === 1) {
+        throw new UnauthorizedException('Token has been revoked');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Authentication service is temporarily unavailable',
+      );
+    }
+
+    return {
+      id: payload.sub,
+      jti: payload.jti,
+      exp: payload.exp,
+    };
   }
 }
