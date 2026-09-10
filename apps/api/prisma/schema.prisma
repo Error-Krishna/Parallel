@@ -63,6 +63,7 @@ model OnboardingResponse {
   answerValue  String   @map("answer_value")
   createdAt    DateTime @default(now()) @map("created_at")
 
+  @@unique([userId, questionKey])
   @@index([userId])
   @@map("onboarding_responses")
 }

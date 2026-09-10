@@ -16,7 +16,7 @@ describe('UsersController', () => {
     toPublicUser: ReturnType<typeof vi.fn>;
   };
 
-  const currentUser = { id: '1', username: 'alex' };
+  const currentUser = { id: '1', jti: 'test-jti', exp: 9999999999 };
   const fakeUserRow = { id: '1', username: 'alex', email: 'a@example.com', passwordHash: 'x', avatarUrl: null, bio: null };
   const fakePublicUser = { id: '1', username: 'alex', avatarUrl: null, bio: null };
 
