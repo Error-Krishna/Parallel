@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service.js';
 import { UsersService } from '../users/users.service.js';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
 
 describe('AuthService', () => {
@@ -31,6 +32,10 @@ describe('AuthService', () => {
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: { sign: vi.fn(() => 'fake.jwt.token') } },
+        // Low salt rounds here (4, not the production default of 12) purely so this
+        // unit test's own bcrypt.hash() calls stay fast — never do this by editing
+        // AuthService's own default, only by overriding the mocked config value.
+        { provide: ConfigService, useValue: { get: vi.fn(() => ({ bcryptSaltRounds: 4 })) } },
         {
           provide: REDIS_CLIENT,
           useValue: {
@@ -56,7 +61,7 @@ describe('AuthService', () => {
   });
 
   it('logs in with correct credentials', async () => {
-    const passwordHash = await bcrypt.hash('correct-password', 12);
+    const passwordHash = await bcrypt.hash('correct-password', 4);
     usersService.findByEmail.mockResolvedValue({ ...fakeUser, passwordHash });
 
     const result = await service.login({ email: 'a@example.com', password: 'correct-password' });
@@ -65,7 +70,7 @@ describe('AuthService', () => {
   });
 
   it('rejects login with the wrong password', async () => {
-    const passwordHash = await bcrypt.hash('correct-password', 12);
+    const passwordHash = await bcrypt.hash('correct-password', 4);
     usersService.findByEmail.mockResolvedValue({ ...fakeUser, passwordHash });
 
     await expect(service.login({ email: 'a@example.com', password: 'wrong-password' })).rejects.toThrow(

@@ -10,6 +10,7 @@ import { RedisProviderModule } from './jobs/redis.provider.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
+import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
 
 @Module({
   imports: [
@@ -33,8 +34,9 @@ import { UsersModule } from './modules/users/users.module.js';
     HealthModule,
     AuthModule,
     UsersModule,
+    OnboardingModule,
     // Feature modules land here as they're built (blueprint §16):
-    // OnboardingModule, IdentityEngineModule, ParallelsModule, QuestsModule, FeedModule,
+    // IdentityEngineModule, ParallelsModule, QuestsModule, FeedModule,
     // SocialModule, CommunitiesModule, EventsModule, WrappedModule, CardsModule,
     // NotificationsModule, AdminModule.
   ],

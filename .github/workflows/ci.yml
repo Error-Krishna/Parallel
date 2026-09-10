@@ -38,7 +38,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://parallel:parallel_ci_password@localhost:5432/parallel_ci?schema=public
       REDIS_URL: redis://localhost:6379
-      JWT_SECRET: ci-only-secret
+      JWT_SECRET: ci-only-secret-not-for-real-use-1234567890
       NODE_ENV: test
 
     steps:
@@ -68,3 +68,12 @@ jobs:
 
       - name: Test
         run: pnpm turbo run test
+
+      - name: E2E test
+        run: pnpm --filter api test:e2e
+        env:
+          JWT_ISSUER: parallel-api
+          JWT_AUDIENCE: parallel-app
+          # Low salt rounds here, not in the app's own default — keeps CI fast without
+          # touching the real production-appropriate value in configuration.ts.
+          BCRYPT_SALT_ROUNDS: "4"

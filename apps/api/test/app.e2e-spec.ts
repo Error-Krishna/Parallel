@@ -1,29 +1,28 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module.js';
+import { createTestApp, getHttpServer } from './utils/create-test-app.js';
 
-describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+describe('App (e2e)', () => {
+  let app: NestFastifyApplication;
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+  beforeAll(async () => {
+    app = await createTestApp();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
-  });
-
-  afterEach(async () => {
+  afterAll(async () => {
     await app.close();
+  });
+
+  it('GET /v1 returns the API status', async () => {
+    const res = await request(getHttpServer(app)).get('/v1');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'Parallel API', status: 'running' });
+  });
+
+  it('GET /v1/health reports database and redis as reachable', async () => {
+    const res = await request(getHttpServer(app)).get('/v1/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.dependencies).toEqual({ database: 'ok', redis: 'ok' });
   });
 });

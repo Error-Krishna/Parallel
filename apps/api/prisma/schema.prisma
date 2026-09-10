@@ -256,6 +256,12 @@ model Follow {
 
 model Twin {
   id                    String   @id @default(cuid())
+  // INVARIANT (not enforced at the DB level — enforce in the service that writes
+  // these rows): userAId must always be the lexicographically smaller of the two
+  // user IDs. @@unique([userAId, userBId]) only prevents an exact duplicate pair in
+  // the same order — without this rule, computing a Twin match for (X, Y) and later
+  // for (Y, X) would insert two rows for the same relationship. Whatever job computes
+  // Twin matches (blueprint §16 Phase 7) must sort the pair before upserting.
   userAId               String   @map("user_a_id")
   userA                 User     @relation("twinUserA", fields: [userAId], references: [id], onDelete: Cascade)
   userBId               String   @map("user_b_id")

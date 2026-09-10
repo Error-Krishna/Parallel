@@ -16,6 +16,7 @@ export interface AppConfig {
   };
   anthropicApiKey?: string;
   embeddingApiKey?: string;
+  bcryptSaltRounds: number;
 }
 
 export default (): { app: AppConfig } => ({
@@ -33,6 +34,10 @@ export default (): { app: AppConfig } => ({
     },
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     embeddingApiKey: process.env.EMBEDDING_API_KEY,
+    // 12 is the production default (current standard baseline for 2026 hardware).
+    // Override to something lower (e.g. 4) only in test/CI env — never lower the
+    // in-source default just to make a slow test suite feel faster.
+    bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '12', 10),
   },
 });
 

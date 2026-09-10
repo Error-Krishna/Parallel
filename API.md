@@ -12,16 +12,26 @@
 - **Auth**: Bearer JWT in `Authorization: Bearer <token>` header, issued by the `auth` module (Phase 5). Endpoints marked 🔒 below require it; NestJS route guards enforce this, not manual checks in controller bodies.
 - **Content type**: `application/json` throughout.
 - **Validation**: every request body is a `class-validator` DTO. The global `ValidationPipe` (`whitelist: true, forbidNonWhitelisted: true, transform: true`, set in `main.ts`) strips unknown fields and rejects anything that doesn't match the DTO shape — a 400 with a validation error array, before the request ever reaches a controller method.
+- **Success shape**: every successful response is wrapped in a consistent envelope (`common/utils/api-response.ts`'s `apiResponse()`):
+  ```json
+  {
+    "success": true,
+    "message": "human-readable description of what happened",
+    "data": {}
+  }
+  ```
+  **Every response shape shown in the tables below (§4 onward) is the shape of `data`, not the top-level response body.** `message` is a short, human-readable confirmation ("Account created successfully", not restated field-by-field); `data` is `null` for actions with nothing meaningful to return (e.g. logout). Controllers throw via `apiError()` (same file's sibling) rather than constructing an error envelope manually — errors never go through this success envelope, they go through the shape below instead.
 - **Error shape** (from `AllExceptionsFilter`, already implemented):
   ```json
   {
     "statusCode": 400,
     "path": "/v1/onboarding/answers",
     "timestamp": "2026-09-05T10:00:00.000Z",
-    "message": "validation or error message here"
+    "message": "a single string, or an array of validation messages",
+    "error": "Bad Request"
   }
   ```
-  No stack traces or internal details are ever sent to the client — unhandled exceptions are logged server-side and returned as a generic `500` with this same shape.
+  `message` is always either a plain string (most thrown exceptions) or a string array (class-validator's `ValidationPipe` errors) — **never** a nested object. `error` is optional (the short HTTP reason phrase) and only present when the underlying exception provided one. Prisma errors are mapped rather than leaked: `P2002` (unique constraint) → `409 Conflict`, `P2025` (record not found) → `404 Not Found`, anything else → generic `500` (logged server-side, not detailed to the client). No stack traces or internal details are ever sent to the client.
 - **Pagination**: cursor-based (`?cursor=<id>&limit=<n>`) for any list endpoint that can grow unbounded (feed, notifications) — not offset-based, to stay stable as new items are inserted.
 - **Rate limiting**: Redis-backed, applied per-route via a guard once auth exists (Phase 10 Hardening) — every public-facing mutation endpoint needs one, not just the ones that "feel" abuse-prone.
 
@@ -33,12 +43,12 @@
 | ------- | --------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
 | `GET`   | `/v1`                 | —    | Root status check — `{ "name": "Parallel API", "status": "running" }`                                                      |
 | `GET`   | `/v1/health`          | —    | Pings Postgres + Redis, returns `HealthResponse` (see `shared-types`) — used by deploy/monitoring, not by the frontend app |
-| `POST`  | `/v1/auth/signup`     | —    | Create an account. `SignupDto { email, username, password }` → `{ user: PublicUser, accessToken }`                         |
-| `POST`  | `/v1/auth/login`      | —    | `LoginDto { email, password }` → `{ user: PublicUser, accessToken }`                                                       |
-| `POST`  | `/v1/auth/logout`     | 🔒   | `204` — stateless JWT, client discards the token                                                                           |
-| `GET`   | `/v1/users/me`        | 🔒   | → `PublicUser`                                                                                                             |
-| `PATCH` | `/v1/users/me`        | 🔒   | `UpdateUserDto` (partial) → `PublicUser`                                                                                   |
-| `GET`   | `/v1/users/:username` | 🔒   | → `PublicUser`                                                                                                             |
+| `POST`  | `/v1/auth/signup`     | —    | `SignupDto { email, username, password }` → `data: { user: PublicUser, accessToken }`                                      |
+| `POST`  | `/v1/auth/login`      | —    | `LoginDto { email, password }` → `data: { user: PublicUser, accessToken }`                                                 |
+| `POST`  | `/v1/auth/logout`     | 🔒   | → `data: null` — **actually revokes the token** (Redis-backed, see §3), not a client-side no-op                            |
+| `GET`   | `/v1/users/me`        | 🔒   | → `data: PublicUser`                                                                                                       |
+| `PATCH` | `/v1/users/me`        | 🔒   | `UpdateUserDto` (partial, rejects an empty body) → `data: PublicUser`                                                      |
+| `GET`   | `/v1/users/:username` | 🔒   | → `data: PublicUser`                                                                                                       |
 
 Everything else in this document below §3 is spec, not yet built — update this table as each module ships.
 
@@ -48,9 +58,15 @@ Everything else in this document below §3 is spec, not yet built — update thi
 
 Endpoints listed in §2 above. Hashing: **bcryptjs** (pure JS, 12 salt rounds) — chosen over `argon2`/`bcrypt` specifically to avoid native-module build friction in this monorepo (same class of issue as the Prisma CLI note in `apps/api/CLAUDE.md`). Passwords are never logged or returned in any response — `UsersService.toPublicUser()` strips both `passwordHash` and `email` before anything reaches a controller response.
 
-Tokens: JWT via `@nestjs/jwt`, `Authorization: Bearer <token>`, secret/expiry from `JWT_SECRET`/`JWT_EXPIRES_IN` (`apps/api/.env`). Verified per-request by `JwtStrategy` (`modules/auth/strategies/jwt.strategy.ts`) and enforced with `@UseGuards(JwtAuthGuard)` — see `UsersController` for the pattern to copy in every future protected controller. The decoded payload becomes `request.user`, retrievable in any controller via the `@CurrentUser()` decorator (`common/decorators/current-user.decorator.ts`).
+Tokens: JWT via `@nestjs/jwt`, `Authorization: Bearer <token>`, secret/expiry/issuer/audience from `JWT_SECRET`/`JWT_EXPIRES_IN`/`JWT_ISSUER`/`JWT_AUDIENCE` (`apps/api/.env`). The signed payload is deliberately minimal — just `{ sub: userId }`, no `username` — since a token issued before a username change would otherwise carry a stale value for its entire remaining lifetime; look up anything beyond the user's ID via `UsersService`. `main.ts` refuses to boot if `JWT_SECRET` is missing or shorter than 32 characters, and `JwtStrategy` rejects any token whose issuer/audience don't match, even if the signature is otherwise valid.
+
+Verified per-request by `JwtStrategy` (`modules/auth/strategies/jwt.strategy.ts`) and enforced with `@UseGuards(JwtAuthGuard)` — see `UsersController` for the pattern to copy in every future protected controller. The decoded payload becomes `request.user` (just `{ id }`), retrievable in any controller via the `@CurrentUser()` decorator (`common/decorators/current-user.decorator.ts`).
 
 Same error message ("Invalid email or password") for both a nonexistent email and a wrong password — deliberate, prevents account enumeration.
+
+Username rules (`common/validators/username.validator.ts`'s `@IsUsername()`) are shared between `SignupDto` and `UpdateUserDto` — kept as one decorator specifically so "create" and "edit" can't drift apart the way they once did.
+
+**Known gap, deferred to Phase 10 Hardening**: logout is stateless (client just discards the token) — a stolen token stays valid until it expires. Revisit with a Redis-backed blocklist (keyed on a token ID, TTL = remaining token life) before this matters in production, not before.
 
 ---
 
