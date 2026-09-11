@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "SignalType" ADD VALUE 'PARALLEL_ENTER';

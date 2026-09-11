@@ -204,6 +204,16 @@ function ParallelCard({
   parallel: UserParallelDto;
   index: number;
 }) {
+  async function handleEnter() {
+    try {
+      const enteredParallel = await api.parallels.enter(
+        parallel.parallelType.id,
+      );
+      console.log('Entered Parallel:', enteredParallel);
+    } catch (err) {
+      console.error('Could not enter Parallel:', err);
+    }
+  }
   const color = getColor(parallel.parallelType.name);
 
   return (
@@ -215,7 +225,7 @@ function ParallelCard({
     >
       <div
         className="absolute -right-16 -top-16 h-40 w-40 rounded-full opacity-10 blur-3xl"
-        style={{ backgrounColor: color }}
+        style={{ backgroundColor: color }}
       />
 
       <div className="relative">
@@ -224,7 +234,7 @@ function ParallelCard({
             className="flex h-11 w-11 items-center justify-center rounded-xl border border-border"
             style={{ color }}
           >
-            <ParallelIcon iconName={parallel.parallelType.icon} className="h-5 w-5" />
+            <ParallelIcon iconName={parallel.parallelType.icon ?? ""} className="h-5 w-5" />
           </div>
 
           <span className="font-mono text-2xl font-semibold" style={{ color }}>
@@ -246,6 +256,7 @@ function ParallelCard({
 
         <button
           type="button"
+          onClick={() => void handleEnter()}
           className="mt-8 inline-flex items-center gap-2 text-sm font-medium transition group-hover:gap-3"
         >
           Enter Parallel

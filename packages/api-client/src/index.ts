@@ -13,6 +13,7 @@ import type {
   OnboardingQuestion,
   OnboardingStatusDto,
   ParallelMapResponse,
+  ParallelTypeDto,
   SignupDto,
   WrappedRecapDto,
 } from '@parallel/shared-types';
@@ -48,9 +49,15 @@ export function createParallelApi(http: AxiosInstance) {
       },
     },
     parallels: {
-      // Fill in as the /parallels endpoints land (blueprint Phase 5/6).
       getMap: async (): Promise<ParallelMapResponse> => {
         const { data } = await http.get<ParallelMapResponse>('/v1/parallels/map');
+        return data;
+      },
+
+      enter: async (parallelId: string): Promise<ParallelTypeDto> => {
+        const { data } = await http.post<ParallelTypeDto>(
+          `/v1/parallels/${parallelId}/enter`,
+        );
         return data;
       },
     },
