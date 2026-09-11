@@ -1,0 +1,3616 @@
+============================================================
+PARALLEL CODE REVIEW SNAPSHOT
+Generated: Fri Sep 11 15:01:08 IST 2026
+============================================================
+
+
+============================================================
+FILE: apps/api/src/app.controller.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppController } from './app.controller.js';
+import { AppService } from './app.service.js';
+
+describe('AppController', () => {
+  let appController: AppController;
+
+  beforeEach(async () => {
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [AppService],
+    }).compile();
+
+    appController = app.get<AppController>(AppController);
+  });
+
+  describe('root', () => {
+    it('should return the API status', () => {
+      expect(appController.getStatus()).toEqual({
+        name: 'Parallel API',
+        status: 'running',
+      });
+    });
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/app.controller.ts
+============================================================
+import { Controller, Get } from '@nestjs/common';
+import { AppService } from './app.service.js';
+
+@Controller()
+export class AppController {
+  constructor(private readonly appService: AppService) {}
+
+  @Get()
+  getStatus() {
+    return this.appService.getStatus();
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/app.module.ts
+============================================================
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { AppController } from './app.controller.js';
+import { AppService } from './app.service.js';
+import configuration from './config/configuration.js';
+import { DatabaseModule } from './database/database.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
+import { RedisProviderModule } from './jobs/redis.provider.js';
+import { HealthModule } from './modules/health/health.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
+import { UsersModule } from './modules/users/users.module.js';
+import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+      load: [configuration],
+    }),
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        transport:
+          process.env.NODE_ENV === 'production'
+            ? undefined
+            : { target: 'pino-pretty', options: { singleLine: true } },
+      },
+    }),
+    DatabaseModule,
+    JobsModule,
+    RedisProviderModule,
+    HealthModule,
+    AuthModule,
+    UsersModule,
+    OnboardingModule,
+    // Feature modules land here as they're built (blueprint §16):
+    // IdentityEngineModule, ParallelsModule, QuestsModule, FeedModule,
+    // SocialModule, CommunitiesModule, EventsModule, WrappedModule, CardsModule,
+    // NotificationsModule, AdminModule.
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+
+
+============================================================
+FILE: apps/api/src/app.service.ts
+============================================================
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {
+  getStatus() {
+    return {
+      name: 'Parallel API',
+      status: 'running',
+    };
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/common/decorators/current-user.decorator.ts
+============================================================
+import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
+
+// JwtStrategy's validate() (see modules/auth/strategies/jwt.strategy.ts) attaches this
+// shape to request.user for every request that passes JwtAuthGuard. Custom param
+// decorators are how NestJS lets a controller pull something off the request without
+// repeating `req.user` boilerplate in every handler — this is the pattern to reuse for
+// any other cross-cutting piece of request data.
+//
+// Deliberately just `id` — username (or any other mutable profile field) doesn't
+// belong in a token's identity claim: a user can rename themselves, and a token
+// issued before the rename would otherwise carry a stale username for its entire
+// remaining lifetime. Look up anything beyond `id` via UsersService when needed.
+export interface AuthenticatedUser {
+  id: string;
+  jti: string;
+  exp: number;
+}
+
+export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthenticatedUser => {
+  const request = ctx.switchToHttp().getRequest<FastifyRequest & { user: AuthenticatedUser }>();
+  return request.user;
+});
+
+
+============================================================
+FILE: apps/api/src/common/filters/all-exceptions.filter.ts
+============================================================
+// Catches anything not handled by a more specific filter and returns a consistent,
+// safe error shape — never leaks stack traces or internal messages to the client.
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { Prisma } from '@prisma/client';
+
+interface ErrorResponseBody {
+  statusCode: number;
+  path: string;
+  timestamp: string;
+  message: string | string[];
+  error?: string;
+}
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const reply = ctx.getResponse<FastifyReply>();
+    const request = ctx.getRequest<FastifyRequest>();
+
+    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      return this.handlePrismaError(exception, reply, request);
+    }
+
+    if (exception instanceof HttpException) {
+      return this.handleHttpException(exception, reply, request);
+    }
+
+    this.logger.error(`Unhandled exception on ${request.method} ${request.url}`, (exception as Error)?.stack);
+    return this.send(reply, {
+      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+      path: request.url,
+      timestamp: new Date().toISOString(),
+      message: 'Internal server error',
+    });
+  }
+
+  // NestJS's ValidationPipe throws a BadRequestException whose getResponse() is an
+  // *object* (`{ statusCode, message: string[], error }`), not a string — returning
+  // that whole object as our `message` field (the original bug) produced a nested,
+  // inconsistent shape depending on which exception fired. This flattens every case
+  // to the same { statusCode, path, timestamp, message, error? } shape.
+  private handleHttpException(exception: HttpException, reply: FastifyReply, request: FastifyRequest) {
+    const status = exception.getStatus();
+    const body = exception.getResponse();
+
+    let message: string | string[];
+    let error: string | undefined;
+
+    if (typeof body === 'string') {
+      message = body;
+    } else if (typeof body === 'object' && body !== null) {
+      const record = body as Record<string, unknown>;
+      message = (record.message as string | string[]) ?? exception.message;
+      error = typeof record.error === 'string' ? record.error : undefined;
+    } else {
+      message = exception.message;
+    }
+
+    return this.send(reply, {
+      statusCode: status,
+      path: request.url,
+      timestamp: new Date().toISOString(),
+      message,
+      ...(error && { error }),
+    });
+  }
+
+  // Prisma's raw errors (P2002 unique constraint, P2025 record not found, ...) should
+  // never reach the client as a 500 with an internal error message — map the common,
+  // client-actionable ones to proper HTTP semantics; anything else stays a generic
+  // 500 (logged, not detailed) rather than risk leaking schema/column names.
+  private handlePrismaError(
+    exception: Prisma.PrismaClientKnownRequestError,
+    reply: FastifyReply,
+    request: FastifyRequest,
+  ) {
+    const timestamp = new Date().toISOString();
+    const path = request.url;
+
+    if (exception.code === 'P2002') {
+      const target = exception.meta?.target;
+      const fields = Array.isArray(target) ? target.join(', ') : String(target ?? 'field');
+      return this.send(reply, {
+        statusCode: HttpStatus.CONFLICT,
+        path,
+        timestamp,
+        message: `A record with this ${fields} already exists`,
+        error: 'Conflict',
+      });
+    }
+
+    if (exception.code === 'P2025') {
+      return this.send(reply, {
+        statusCode: HttpStatus.NOT_FOUND,
+        path,
+        timestamp,
+        message: 'Record not found',
+        error: 'Not Found',
+      });
+    }
+
+    this.logger.error(`Unhandled Prisma error ${exception.code} on ${request.method} ${path}`, exception.stack);
+    return this.send(reply, {
+      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+      path,
+      timestamp,
+      message: 'Internal server error',
+    });
+  }
+
+  private send(reply: FastifyReply, body: ErrorResponseBody) {
+    return reply.status(body.statusCode).send(body);
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/common/utils/api-error.ts
+============================================================
+import { HttpException, HttpStatus } from '@nestjs/common';
+
+export function apiError(
+  message: string,
+  statusCode: HttpStatus = HttpStatus.INTERNAL_SERVER_ERROR,
+): never {
+  throw new HttpException(message, statusCode);
+}
+
+
+============================================================
+FILE: apps/api/src/common/utils/api-response.ts
+============================================================
+export interface ApiResponse<T> {
+  success: true;
+  message: string;
+  data: T;
+}
+
+export function apiResponse<T>(
+  data: T,
+  message = 'Request successful',
+): ApiResponse<T> {
+  return {
+    success: true,
+    message,
+    data,
+  };
+}
+
+
+============================================================
+FILE: apps/api/src/common/validators/username.validator.ts
+============================================================
+import { applyDecorators } from '@nestjs/common';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+
+export const USERNAME_MIN_LENGTH = 3;
+export const USERNAME_MAX_LENGTH = 30;
+export const USERNAME_PATTERN = /^[a-zA-Z0-9_]+$/;
+
+// Single source of truth for username rules — used by both SignupDto and
+// UpdateUserDto so the constraint can never drift between "create" and "edit"
+// (a real gap in the original implementation: signup enforced this, profile
+// update didn't). Add @IsOptional() separately at the call site for DTOs where
+// the field isn't required.
+export function IsUsername() {
+  return applyDecorators(
+    IsString(),
+    MinLength(USERNAME_MIN_LENGTH),
+    MaxLength(USERNAME_MAX_LENGTH),
+    Matches(USERNAME_PATTERN, {
+      message: 'username can only contain letters, numbers, and underscores',
+    }),
+  );
+}
+
+
+============================================================
+FILE: apps/api/src/config/configuration.ts
+============================================================
+// Typed application configuration, loaded via @nestjs/config.
+// Add new env-driven settings here rather than reading process.env directly in modules —
+// keeps every config value validated and typed in one place.
+import type { JwtSignOptions } from '@nestjs/jwt';
+export interface AppConfig {
+  nodeEnv: string;
+  port: number;
+  corsOrigin: string;
+  databaseUrl: string;
+  redisUrl: string;
+  jwt: {
+    secret: string;
+    expiresIn: JwtSignOptions['expiresIn'];
+    issuer: string;
+    audience: string;
+  };
+  anthropicApiKey?: string;
+  embeddingApiKey?: string;
+  bcryptSaltRounds: number;
+}
+
+export default (): { app: AppConfig } => ({
+  app: {
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    port: parseInt(process.env.PORT ?? '3001', 10),
+    corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    databaseUrl: process.env.DATABASE_URL ?? '',
+    redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    jwt: {
+      secret: process.env.JWT_SECRET ?? '',
+      expiresIn: (process.env.JWT_EXPIRES_IN ?? '7d') as JwtSignOptions['expiresIn'],
+      issuer: process.env.JWT_ISSUER ?? 'parallel-api',
+      audience: process.env.JWT_AUDIENCE ?? 'parallel-app',
+    },
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    embeddingApiKey: process.env.EMBEDDING_API_KEY,
+    // 12 is the production default (current standard baseline for 2026 hardware).
+    // Override to something lower (e.g. 4) only in test/CI env — never lower the
+    // in-source default just to make a slow test suite feel faster.
+    bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '12', 10),
+  },
+});
+
+// Minimum acceptable length for JWT_SECRET — checked at startup in main.ts. Anything
+// shorter is either a placeholder that was never replaced or too weak to sign real
+// tokens with; refusing to boot is deliberate (fail loud at startup, not silently at
+// the first forged-token attempt).
+export const MIN_JWT_SECRET_LENGTH = 32;
+
+
+============================================================
+FILE: apps/api/src/database/database.module.ts
+============================================================
+// Global module — import once in AppModule, then inject PrismaService anywhere
+// via constructor injection without re-importing DatabaseModule everywhere.
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service.js';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class DatabaseModule {}
+
+
+============================================================
+FILE: apps/api/src/database/prisma.service.ts
+============================================================
+// Thin wrapper around PrismaClient, registered as a NestJS provider so it can be
+// dependency-injected into any service (`constructor(private prisma: PrismaService)`)
+// instead of every module creating its own client instance.
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  async onModuleInit() {
+    await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/jobs/jobs.module.ts
+============================================================
+// Root BullMQ connection, shared by every queue/processor added in later phases
+// (embedding generation, identity re-scoring, Wrapped generation, notification fan-out —
+// see blueprint §16 Phase 6/9). Import this once in AppModule; individual feature modules
+// register their own queues with BullModule.registerQueue({ name: '...' }) and get this
+// connection for free.
+import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import type { AppConfig } from '../config/configuration.js';
+
+@Module({
+  imports: [
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const { redisUrl } = config.get<AppConfig>('app')!;
+        const url = new URL(redisUrl);
+        return {
+          connection: {
+            host: url.hostname,
+            port: Number(url.port || 6379),
+          },
+        };
+      },
+    }),
+  ],
+  exports: [BullModule],
+})
+export class JobsModule {}
+
+
+============================================================
+FILE: apps/api/src/jobs/redis.provider.ts
+============================================================
+import { Global, Injectable, Module, type OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Redis } from 'ioredis';
+import type { AppConfig } from '../config/configuration.js';
+
+export const REDIS_CLIENT = 'REDIS_CLIENT';
+
+// Extending Redis directly (rather than a factory returning a plain `new Redis(...)`)
+// is what lets Nest's lifecycle hooks apply here — a raw ioredis instance has no
+// onModuleDestroy(), so it would never get cleaned up when app.close() runs (see
+// enableShutdownHooks() in main.ts). This class does.
+@Injectable()
+export class RedisClientService extends Redis implements OnModuleDestroy {
+  constructor(config: ConfigService) {
+    const { redisUrl } = config.get<AppConfig>('app')!;
+    super(redisUrl, { maxRetriesPerRequest: null });
+  }
+
+  async onModuleDestroy() {
+    await this.quit();
+  }
+}
+
+@Global()
+@Module({
+  providers: [{ provide: REDIS_CLIENT, useClass: RedisClientService }],
+  exports: [REDIS_CLIENT],
+})
+export class RedisProviderModule {}
+
+
+============================================================
+FILE: apps/api/src/main.ts
+============================================================
+// Boots the API on Fastify (only @nestjs/platform-fastify is installed — no Express
+// fallback, so the adapter must be passed explicitly here).
+import { NestFactory } from '@nestjs/core';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Logger } from 'nestjs-pino';
+import { AppModule } from './app.module.js';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { MIN_JWT_SECRET_LENGTH, type AppConfig } from './config/configuration.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
+    bufferLogs: true,
+  });
+
+  app.useLogger(app.get(Logger));
+
+  const config = app.get(ConfigService);
+  const { port, corsOrigin, jwt } = config.get<AppConfig>('app')!;
+
+  // Fail fast rather than silently signing tokens with an empty or placeholder
+  // secret — this would otherwise only surface as a security problem, not a
+  // startup error, which is far worse to discover late.
+  if (!jwt.secret || jwt.secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+      `JWT_SECRET is missing or too short (must be at least ${MIN_JWT_SECRET_LENGTH} characters). ` +
+        'Set a strong value in apps/api/.env before starting the server.',
+    );
+  }
+
+  app.enableCors({ origin: corsOrigin, credentials: true });
+  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // Lets Nest respond to SIGTERM/SIGINT by calling app.close(), which in turn runs
+  // onModuleDestroy() on every provider that implements it (PrismaService,
+  // RedisClientService — see jobs/redis.provider.ts) instead of the process dying
+  // with open DB/Redis connections still attached.
+  app.enableShutdownHooks();
+
+  await app.listen(port, '0.0.0.0');
+  app.get(Logger).log(`Parallel API listening on http://localhost:${port}`);
+}
+
+await bootstrap();
+
+
+============================================================
+FILE: apps/api/src/modules/auth/auth.controller.ts
+============================================================
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthService } from './auth.service.js';
+import { apiResponse } from '../../common/utils/api-response.js';
+import { SignupDto } from './dto/signup.dto.js';
+import { LoginDto } from './dto/login.dto.js';
+import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
+import {
+  CurrentUser,
+  type AuthenticatedUser,
+} from '../../common/decorators/current-user.decorator.js';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('signup')
+  async signup(@Body() dto: SignupDto) {
+    const result = await this.authService.signup(dto);
+    return apiResponse(result, 'Account created successfully');
+  }
+
+  @Post('login')
+  async login(@Body() dto: LoginDto) {
+    const result = await this.authService.login(dto);
+    return apiResponse(result, 'Login successful');
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  async logout(@CurrentUser() currentUser: AuthenticatedUser) {
+    await this.authService.logout(currentUser);
+    return apiResponse(null, 'User logged out successfully');
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/auth.module.ts
+============================================================
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthController } from './auth.controller.js';
+import { AuthService } from './auth.service.js';
+import { JwtStrategy } from './strategies/jwt.strategy.js';
+import { UsersModule } from '../users/users.module.js';
+import type { AppConfig } from '../../config/configuration.js';
+
+@Module({
+  imports: [
+    UsersModule,
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const { jwt } = config.get<AppConfig>('app')!;
+        return {
+          secret: jwt.secret,
+          signOptions: {
+            expiresIn: jwt.expiresIn,
+            issuer: jwt.issuer,
+            audience: jwt.audience,
+          },
+        };
+      },
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, JwtStrategy],
+  exports: [PassportModule],
+})
+export class AuthModule {}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/auth.service.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { UnauthorizedException } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { AuthService } from './auth.service.js';
+import { UsersService } from '../users/users.service.js';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
+
+describe('AuthService', () => {
+  let service: AuthService;
+  let usersService: { findByEmail: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; toPublicUser: ReturnType<typeof vi.fn> };
+
+  const fakeUser = {
+    id: '1',
+    email: 'a@example.com',
+    username: 'alex',
+    passwordHash: '', // set per-test below
+    avatarUrl: null,
+    bio: null,
+  };
+
+  beforeEach(async () => {
+    usersService = {
+      findByEmail: vi.fn(),
+      create: vi.fn(),
+      toPublicUser: vi.fn((u) => ({ id: u.id, username: u.username, avatarUrl: u.avatarUrl, bio: u.bio })),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: UsersService, useValue: usersService },
+        { provide: JwtService, useValue: { sign: vi.fn(() => 'fake.jwt.token') } },
+        // Low salt rounds here (4, not the production default of 12) purely so this
+        // unit test's own bcrypt.hash() calls stay fast — never do this by editing
+        // AuthService's own default, only by overriding the mocked config value.
+        { provide: ConfigService, useValue: { get: vi.fn(() => ({ bcryptSaltRounds: 4 })) } },
+        {
+          provide: REDIS_CLIENT,
+          useValue: {
+            set: vi.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(AuthService);
+  });
+
+  it('signs up a new user and returns a token', async () => {
+    usersService.create.mockResolvedValue({ ...fakeUser, passwordHash: 'irrelevant' });
+
+    const result = await service.signup({ email: 'a@example.com', username: 'alex', password: 'password123' });
+
+    expect(result.accessToken).toBe('fake.jwt.token');
+    expect(result.user.username).toBe('alex');
+    expect(usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'a@example.com', username: 'alex' }),
+    );
+  });
+
+  it('logs in with correct credentials', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    usersService.findByEmail.mockResolvedValue({ ...fakeUser, passwordHash });
+
+    const result = await service.login({ email: 'a@example.com', password: 'correct-password' });
+
+    expect(result.accessToken).toBe('fake.jwt.token');
+  });
+
+  it('rejects login with the wrong password', async () => {
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    usersService.findByEmail.mockResolvedValue({ ...fakeUser, passwordHash });
+
+    await expect(service.login({ email: 'a@example.com', password: 'wrong-password' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects login for a nonexistent email with the same error as a wrong password', async () => {
+    usersService.findByEmail.mockResolvedValue(null);
+
+    await expect(service.login({ email: 'nobody@example.com', password: 'anything' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/modules/auth/auth.service.ts
+============================================================
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
+import { Redis } from 'ioredis';
+import * as bcrypt from 'bcryptjs';
+import type { User } from '@prisma/client';
+import type { PublicUser } from '@parallel/shared-types';
+import { UsersService } from '../users/users.service.js';
+import type { SignupDto } from './dto/signup.dto.js';
+import type { LoginDto } from './dto/login.dto.js';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
+import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator.js';
+import type { AppConfig } from '../../config/configuration.js';
+
+export interface AuthResult {
+  user: PublicUser;
+  accessToken: string;
+}
+
+@Injectable()
+export class AuthService {
+  private readonly bcryptSaltRounds: number;
+
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {
+    // Configurable so CI/test envs can lower it for speed via BCRYPT_SALT_ROUNDS —
+    // the in-source default must stay at the real production value (12) regardless.
+    this.bcryptSaltRounds = this.configService.get<AppConfig>('app')!.bcryptSaltRounds;
+  }
+
+  async signup(dto: SignupDto): Promise<AuthResult> {
+    const email = dto.email.trim().toLowerCase();
+    const username = dto.username.trim().toLowerCase();
+
+    const passwordHash = await bcrypt.hash(dto.password, this.bcryptSaltRounds);
+
+    const user = await this.usersService.create({
+      email,
+      username,
+      passwordHash,
+    });
+
+    return this.buildAuthResult(user);
+  }
+
+  async login(dto: LoginDto): Promise<AuthResult> {
+    const email = dto.email.trim().toLowerCase();
+
+    const user = await this.usersService.findByEmail(email);
+
+    // Deliberately the same error for "no such email" and "wrong password" — never
+    // reveal which one was wrong (standard auth hygiene, prevents email enumeration).
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    return this.buildAuthResult(user);
+  }
+
+  // Real server-side revocation: blocklist this specific token's `jti` in Redis for
+  // exactly as long as it would otherwise remain valid. JwtStrategy checks this key
+  // on every subsequent request (see strategies/jwt.strategy.ts) — this is what makes
+  // a stolen-but-logged-out token actually stop working instead of staying valid
+  // until natural expiry.
+  async logout(user: AuthenticatedUser): Promise<void> {
+    const remainingSeconds = user.exp - Math.floor(Date.now() / 1000);
+
+    if (remainingSeconds <= 0) {
+      return;
+    }
+
+    await this.redis.set(`auth:revoked:${user.jti}`, '1', 'EX', remainingSeconds);
+  }
+
+  private buildAuthResult(user: User): AuthResult {
+    // Deliberately just `sub` + `jti` — no username (see AuthenticatedUser's doc
+    // comment for why a mutable field doesn't belong in a token's identity claim).
+    // `jti` (JWT ID) is what logout() above revokes — without a per-token identifier,
+    // revocation could only ever blocklist a whole user, not a single session.
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      jti: randomUUID(),
+    });
+
+    return {
+      user: this.usersService.toPublicUser(user),
+      accessToken,
+    };
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/dto/login.dto.ts
+============================================================
+import {
+  IsEmail,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+
+export class LoginDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(72)
+  password!: string;
+}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/dto/signup.dto.ts
+============================================================
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsUsername } from '../../../common/validators/username.validator.js';
+
+export class SignupDto {
+  @IsEmail()
+  email!: string;
+
+  @IsUsername()
+  username!: string;
+
+  @IsString()
+  @MinLength(8, { message: 'password must be at least 8 characters' })
+  @MaxLength(72) // bcrypt truncates beyond 72 bytes — reject longer inputs explicitly instead of silently truncating
+  password!: string;
+}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/guards/jwt-auth.guard.ts
+============================================================
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+
+
+============================================================
+FILE: apps/api/src/modules/auth/strategies/jwt.strategy.ts
+============================================================
+import {
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
+import { Inject } from '@nestjs/common';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Redis } from 'ioredis';
+import type { AppConfig } from '../../../config/configuration.js';
+import { REDIS_CLIENT } from '../../../jobs/redis.provider.js';
+import type { AuthenticatedUser } from '../../../common/decorators/current-user.decorator.js';
+
+interface JwtPayload {
+  sub?: unknown;
+  jti?: unknown;
+  exp?: unknown;
+}
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
+    config: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {
+    const appConfig = config.get<AppConfig>('app');
+
+    if (!appConfig) {
+      throw new Error('Application configuration is unavailable');
+    }
+
+    const { jwt } = appConfig;
+
+    super({
+      jwtFromRequest: (request) =>
+        ExtractJwt.fromAuthHeaderAsBearerToken()(request) ??
+        (request as typeof request & {
+          cookies?: { accessToken?: string };
+        }).cookies?.accessToken,
+      ignoreExpiration: false,
+      secretOrKey: jwt.secret,
+      issuer: jwt.issuer,
+      audience: jwt.audience,
+    });
+  }
+
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    if (
+      typeof payload.sub !== 'string' ||
+      payload.sub.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.jti !== 'string' ||
+      payload.jti.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.exp !== 'number' ||
+      !Number.isFinite(payload.exp)
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    try {
+      const revoked = await this.redis.exists(`auth:revoked:${payload.jti}`);
+
+      if (revoked === 1) {
+        throw new UnauthorizedException('Token has been revoked');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Authentication service is temporarily unavailable',
+      );
+    }
+
+    return {
+      id: payload.sub,
+      jti: payload.jti,
+      exp: payload.exp,
+    };
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/health/health.controller.ts
+============================================================
+// Minimal health check — verifies the API process is up and can reach Postgres + Redis.
+// No @nestjs/terminus dependency yet (keep the dependency list lean at Phase 4); swap in
+// Terminus later if richer health/readiness checks are needed for deployment (blueprint §17).
+import { Controller, Get, Inject } from '@nestjs/common';
+import { PrismaService } from '../../database/prisma.service.js';
+import { Redis } from 'ioredis';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
+
+@Controller('health')
+export class HealthController {
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
+
+  @Get()
+  async check() {
+    const [dbOk, redisOk] = await Promise.all([this.checkDatabase(), this.checkRedis()]);
+
+    return {
+      status: dbOk && redisOk ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      dependencies: {
+        database: dbOk ? 'ok' : 'unreachable',
+        redis: redisOk ? 'ok' : 'unreachable',
+      },
+    };
+  }
+
+  private async checkDatabase(): Promise<boolean> {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async checkRedis(): Promise<boolean> {
+    try {
+      const pong = await this.redis.ping();
+      return pong === 'PONG';
+    } catch {
+      return false;
+    }
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/health/health.module.ts
+============================================================
+import { Module } from '@nestjs/common';
+import { HealthController } from './health.controller.js';
+
+@Module({
+  controllers: [HealthController],
+})
+export class HealthModule {}
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/dto/onboarding-answer.dto.ts
+============================================================
+import { IsIn, IsString } from 'class-validator';
+import { ONBOARDING_QUESTIONS } from '../onboarding.questions.js';
+
+const QUESTION_KEYS = ONBOARDING_QUESTIONS.map((question) => question.key);
+
+export class OnboardingAnswerDto {
+  @IsString()
+  @IsIn(QUESTION_KEYS)
+  questionKey!: string;
+
+  @IsString()
+  answerValue!: string;
+}
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.controller.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { OnboardingController } from './onboarding.controller.js';
+import { OnboardingService } from './onboarding.service.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+
+describe('OnboardingController', () => {
+  let controller: OnboardingController;
+
+  const onboardingService = {
+    getQuestions: vi.fn(),
+    saveAnswer: vi.fn(),
+    getCompletionStatus: vi.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [OnboardingController],
+      providers: [
+        {
+          provide: OnboardingService,
+          useValue: onboardingService,
+        },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate: () => true,
+      })
+      .compile();
+
+    controller = module.get<OnboardingController>(OnboardingController);
+
+    vi.clearAllMocks();
+  });
+
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
+  });
+
+  it('returns onboarding questions', () => {
+    const questions = [
+      {
+        key: 'friday_night',
+        question: 'Your ideal Friday night?',
+        options: [],
+      },
+    ];
+
+    onboardingService.getQuestions.mockReturnValue(questions);
+
+    expect(controller.getQuestions()).toEqual(questions);
+    expect(onboardingService.getQuestions).toHaveBeenCalledOnce();
+  });
+
+  it('saves an onboarding answer', async () => {
+    onboardingService.saveAnswer.mockResolvedValue(undefined);
+
+    const user = {
+      id: 'user-1',
+      jti: 'test-jti',
+      exp: 9999999999,
+    };
+
+    const dto = {
+      questionKey: 'friday_night',
+      answerValue: 'friends',
+    };
+
+    await controller.saveAnswer(user, dto);
+
+    expect(onboardingService.saveAnswer).toHaveBeenCalledWith(
+      'user-1',
+      dto,
+    );
+  });
+
+  it('returns onboarding completion status', async () => {
+    const status = {
+      completed: false,
+      answeredCount: 2,
+      totalQuestions: 4,
+      answers: [],
+    };
+
+    onboardingService.getCompletionStatus.mockResolvedValue(status);
+
+    const user = {
+      id: 'user-1',
+      jti: 'test-jti',
+      exp: 9999999999,
+    };
+
+    const result = await controller.getStatus(user);
+
+    expect(result).toEqual(status);
+    expect(onboardingService.getCompletionStatus).toHaveBeenCalledWith(
+      'user-1',
+    );
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.controller.ts
+============================================================
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Body,
+  UseGuards,
+} from '@nestjs/common';
+import { OnboardingService } from './onboarding.service.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import {
+  CurrentUser,
+  type AuthenticatedUser,
+} from '../../common/decorators/current-user.decorator.js';
+import { OnboardingAnswerDto } from './dto/onboarding-answer.dto.js';
+
+@Controller('onboarding')
+@UseGuards(JwtAuthGuard)
+export class OnboardingController {
+  constructor(private readonly onboardingService: OnboardingService) {}
+
+  @Get('questions')
+  getQuestions() {
+    return this.onboardingService.getQuestions();
+  }
+
+  @Post('answers')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async saveAnswer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: OnboardingAnswerDto,
+  ): Promise<void> {
+    await this.onboardingService.saveAnswer(user.id, dto);
+  }
+
+  @Get('status')
+  async getStatus(@CurrentUser() user: AuthenticatedUser) {
+    return this.onboardingService.getCompletionStatus(user.id);
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.module.ts
+============================================================
+import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
+import { OnboardingController } from './onboarding.controller.js';
+import { OnboardingService } from './onboarding.service.js';
+
+@Module({
+  imports: [AuthModule],
+  controllers: [OnboardingController],
+  providers: [OnboardingService],
+})
+export class OnboardingModule {}
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.questions.ts
+============================================================
+export interface OnboardingQuestionOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingQuestion {
+  key: string;
+  question: string;
+  options: OnboardingQuestionOption[];
+}
+
+export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
+  {
+    key: 'friday_night',
+    question: 'Your ideal Friday night?',
+    options: [
+      { value: 'friends', label: 'Out with friends' },
+      { value: 'home', label: 'Chilling at home' },
+      { value: 'explore', label: 'Exploring somewhere new' },
+      { value: 'create', label: 'Making/building something' },
+    ],
+  },
+  {
+    key: 'learn_or_make',
+    question: 'What sounds more like you?',
+    options: [
+      { value: 'learn', label: 'Learning something new' },
+      { value: 'make', label: 'Making something myself' },
+      { value: 'both', label: 'A bit of both' },
+    ],
+  },
+  {
+    key: 'plan_or_improvise',
+    question: 'How do you usually approach things?',
+    options: [
+      { value: 'plan', label: 'Plan everything' },
+      { value: 'improvise', label: 'Go with the flow' },
+      { value: 'mix', label: 'Depends on the situation' },
+    ],
+  },
+  {
+    key: 'natural_activity',
+    question: 'Which activity feels most natural to you?',
+    options: [
+      { value: 'building', label: 'Building / creating' },
+      { value: 'music', label: 'Music / art' },
+      { value: 'people', label: 'Meeting people' },
+      { value: 'exploring', label: 'Exploring / discovering' },
+    ],
+  },
+];
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.service.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
+import { OnboardingService } from './onboarding.service.js';
+import { PrismaService } from '../../database/prisma.service.js';
+
+describe('OnboardingService', () => {
+  let service: OnboardingService;
+
+  let prisma: {
+    onboardingResponse: {
+      upsert: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
+    };
+  };
+
+  beforeEach(async () => {
+    prisma = {
+      onboardingResponse: {
+        upsert: vi.fn(),
+        findMany: vi.fn(),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        OnboardingService,
+        {
+          provide: PrismaService,
+          useValue: prisma,
+        },
+      ],
+    }).compile();
+
+    service = module.get<OnboardingService>(OnboardingService);
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  it('returns the configured onboarding questions', () => {
+    const questions = service.getQuestions();
+
+    expect(questions).toHaveLength(4);
+    expect(questions[0].key).toBe('friday_night');
+  });
+
+  it('saves a valid onboarding answer', async () => {
+    prisma.onboardingResponse.upsert.mockResolvedValue({});
+
+    await service.saveAnswer('user-1', {
+      questionKey: 'friday_night',
+      answerValue: 'friends',
+    });
+
+    expect(prisma.onboardingResponse.upsert).toHaveBeenCalledWith({
+      where: {
+        userId_questionKey: {
+          userId: 'user-1',
+          questionKey: 'friday_night',
+        },
+      },
+      update: {
+        answerValue: 'friends',
+      },
+      create: {
+        userId: 'user-1',
+        questionKey: 'friday_night',
+        answerValue: 'friends',
+      },
+    });
+  });
+
+  it('rejects an invalid answer', async () => {
+    await expect(
+      service.saveAnswer('user-1', {
+        questionKey: 'friday_night',
+        answerValue: 'invalid-answer',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.onboardingResponse.upsert).not.toHaveBeenCalled();
+  });
+
+  it('reports onboarding as incomplete when answers are missing', async () => {
+    prisma.onboardingResponse.findMany.mockResolvedValue([
+      {
+        questionKey: 'friday_night',
+        answerValue: 'friends',
+      },
+    ]);
+
+    const result = await service.getCompletionStatus('user-1');
+
+    expect(result).toEqual({
+      completed: false,
+      answeredCount: 1,
+      totalQuestions: 4,
+      answers: [
+        {
+          questionKey: 'friday_night',
+          answerValue: 'friends',
+        },
+      ],
+    });
+  });
+
+  it('reports onboarding as complete when all questions are answered', async () => {
+    prisma.onboardingResponse.findMany.mockResolvedValue([
+      {
+        questionKey: 'friday_night',
+        answerValue: 'friends',
+      },
+      {
+        questionKey: 'learn_or_make',
+        answerValue: 'learn',
+      },
+      {
+        questionKey: 'plan_or_improvise',
+        answerValue: 'plan',
+      },
+      {
+        questionKey: 'natural_activity',
+        answerValue: 'building',
+      },
+    ]);
+
+    const result = await service.getCompletionStatus('user-1');
+
+    expect(result.completed).toBe(true);
+    expect(result.answeredCount).toBe(4);
+    expect(result.totalQuestions).toBe(4);
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/modules/onboarding/onboarding.service.ts
+============================================================
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+import { PrismaService } from '../../database/prisma.service.js';
+import {
+  ONBOARDING_QUESTIONS,
+  OnboardingQuestion,
+} from './onboarding.questions.js';
+import { OnboardingAnswerDto } from './dto/onboarding-answer.dto.js';
+
+@Injectable()
+export class OnboardingService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  getQuestions(): OnboardingQuestion[] {
+    return ONBOARDING_QUESTIONS;
+  }
+
+  async saveAnswer(userId: string, dto: OnboardingAnswerDto): Promise<void> {
+    const question = ONBOARDING_QUESTIONS.find(
+      (item) => item.key === dto.questionKey,
+    );
+
+    if (!question) {
+      throw new BadRequestException('Invalid onboarding question');
+    }
+
+    const validAnswer = question.options.some(
+      (option) => option.value === dto.answerValue,
+    );
+
+    if (!validAnswer) {
+      throw new BadRequestException('Invalid answer for this question');
+    }
+
+    await this.prisma.onboardingResponse.upsert({
+      where: {
+        userId_questionKey: {
+          userId,
+          questionKey: dto.questionKey,
+        },
+      },
+      update: {
+        answerValue: dto.answerValue,
+      },
+      create: {
+        userId,
+        questionKey: dto.questionKey,
+        answerValue: dto.answerValue,
+      },
+    });
+  }
+
+  async getCompletionStatus(userId: string) {
+    const answers = await this.prisma.onboardingResponse.findMany({
+      where: { userId },
+      select: {
+        questionKey: true,
+        answerValue: true,
+      },
+    });
+
+    return {
+      completed: answers.length === ONBOARDING_QUESTIONS.length,
+      answeredCount: answers.length,
+      totalQuestions: ONBOARDING_QUESTIONS.length,
+      answers,
+    };
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/users/dto/update-user.dto.ts
+============================================================
+import { IsOptional, IsString, IsUrl, MaxLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsUsername } from '../../../common/validators/username.validator.js';
+import { VisibilitySettingsDto } from './visibility-settings.dto.js';
+
+// Every field optional — PATCH /v1/users/me is a partial update (see API.md §3).
+// username uses the same @IsUsername() rules as signup (was previously unvalidated
+// here — a real inconsistency between "create" and "edit" paths).
+export class UpdateUserDto {
+  @IsOptional()
+  @IsUsername()
+  username?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  bio?: string;
+
+  @IsOptional()
+  @IsUrl()
+  avatarUrl?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VisibilitySettingsDto)
+  visibilitySettings?: VisibilitySettingsDto;
+}
+
+
+============================================================
+FILE: apps/api/src/modules/users/dto/visibility-settings.dto.ts
+============================================================
+import { IsBoolean, IsIn, IsOptional } from 'class-validator';
+
+// Explicit, validated shape instead of arbitrary Record<string, unknown> — this field
+// controls real privacy/visibility behavior (blueprint §22), so it shouldn't accept
+// whatever JSON a client sends. Add new keys here deliberately as privacy controls
+// are actually built (blueprint §14 Profile/Privacy flow) — never widen this back to
+// an unchecked bag of keys.
+export class VisibilitySettingsDto {
+  @IsOptional()
+  @IsIn(['public', 'friends', 'private'])
+  profileVisibility?: 'public' | 'friends' | 'private';
+
+  @IsOptional()
+  @IsBoolean()
+  showActivityStatus?: boolean;
+}
+
+
+============================================================
+FILE: apps/api/src/modules/users/users.controller.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { UsersController } from './users.controller.js';
+import { UsersService } from './users.service.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+
+// Unit test for the controller — since UsersController has no logic of its own (it's
+// pure routing, see apps/api/CLAUDE.md), this mostly confirms it calls the right
+// service method and returns what the service gives it. UsersService is mocked, so
+// this never touches Prisma or a real database.
+describe('UsersController', () => {
+  let controller: UsersController;
+  let usersService: {
+    findById: ReturnType<typeof vi.fn>;
+    findByUsername: ReturnType<typeof vi.fn>;
+    updateProfile: ReturnType<typeof vi.fn>;
+    toPublicUser: ReturnType<typeof vi.fn>;
+  };
+
+  const currentUser = { id: '1', jti: 'test-jti', exp: 9999999999 };
+  const fakeUserRow = { id: '1', username: 'alex', email: 'a@example.com', passwordHash: 'x', avatarUrl: null, bio: null };
+  const fakePublicUser = { id: '1', username: 'alex', avatarUrl: null, bio: null };
+
+  beforeEach(async () => {
+    usersService = {
+      findById: vi.fn().mockResolvedValue(fakeUserRow),
+      findByUsername: vi.fn(),
+      updateProfile: vi.fn().mockResolvedValue(fakeUserRow),
+      toPublicUser: vi.fn().mockReturnValue(fakePublicUser),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [UsersController],
+      providers: [{ provide: UsersService, useValue: usersService }],
+    })
+      // UsersController is decorated with @UseGuards(JwtAuthGuard) at the class level.
+      // The real guard extends Passport's AuthGuard('jwt'), which needs AuthModuleOptions
+      // — a provider that only exists inside AuthModule/PassportModule, not in this
+      // deliberately minimal test module. overrideGuard() swaps it for a stub that always
+      // allows the request through, so this test can focus purely on controller→service
+      // wiring instead of re-testing auth (which auth.service.spec.ts already covers).
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    controller = module.get(UsersController);
+  });
+
+  it('is defined', () => {
+    expect(controller).toBeDefined();
+  });
+
+  it('getMe returns the current user as a PublicUser', async () => {
+    const result = await controller.getMe(currentUser);
+    expect(usersService.findById).toHaveBeenCalledWith('1');
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile fetched successfully',
+      data: fakePublicUser,
+    });
+  });
+
+  it('updateMe passes the DTO through to the service', async () => {
+    const dto = { bio: 'new bio' };
+    const result = await controller.updateMe(currentUser, dto);
+    expect(usersService.updateProfile).toHaveBeenCalledWith('1', dto);
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile updated successfully',
+      data: fakePublicUser,
+    });
+  });
+
+  it('getByUsername returns a PublicUser when found', async () => {
+    usersService.findByUsername.mockResolvedValue(fakeUserRow);
+    const result = await controller.getByUsername('alex');
+    expect(result).toEqual({
+      success: true,
+      message: 'User profile fetched successfully',
+      data: fakePublicUser,
+    });
+  });
+
+  it('getByUsername throws NotFoundException when the user does not exist', async () => {
+    usersService.findByUsername.mockResolvedValue(null);
+    await expect(controller.getByUsername('nobody')).rejects.toMatchObject({
+      message: 'User not found',
+      status: 404,
+    });
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/modules/users/users.controller.ts
+============================================================
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  Param,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
+import { UsersService } from './users.service.js';
+import { apiResponse } from '../../common/utils/api-response.js';
+import { apiError } from '../../common/utils/api-error.js';
+import { UpdateUserDto } from './dto/update-user.dto.js';
+import {
+  CurrentUser,
+  type AuthenticatedUser,
+} from '../../common/decorators/current-user.decorator.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+
+@Controller('users')
+@UseGuards(JwtAuthGuard)
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get('me')
+  async getMe(@CurrentUser() currentUser: AuthenticatedUser) {
+    const user = await this.usersService.findById(currentUser.id);
+
+    return apiResponse(
+      this.usersService.toPublicUser(user),
+      'User profile fetched successfully',
+    );
+  }
+
+  @Patch('me')
+  async updateMe(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Body() dto: UpdateUserDto,
+  ) {
+    if (Object.keys(dto).length === 0) {
+      apiError(
+        'At least one profile field must be provided',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const user = await this.usersService.updateProfile(
+      currentUser.id,
+      dto,
+    );
+
+    return apiResponse(
+      this.usersService.toPublicUser(user),
+      'User profile updated successfully',
+    );
+  }
+
+  @Get(':username')
+  async getByUsername(@Param('username') username: string) {
+    const user = await this.usersService.findByUsername(username);
+
+    if (!user) {
+      apiError('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    return apiResponse(
+      this.usersService.toPublicUser(user),
+      'User profile fetched successfully',
+    );
+  }
+}
+
+
+============================================================
+FILE: apps/api/src/modules/users/users.module.ts
+============================================================
+import { Module } from '@nestjs/common';
+import { PassportModule } from '@nestjs/passport';
+import { UsersController } from './users.controller.js';
+import { UsersService } from './users.service.js';
+
+@Module({
+  imports: [
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+  ],
+  controllers: [UsersController],
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+
+============================================================
+FILE: apps/api/src/modules/users/users.service.spec.ts
+============================================================
+import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { UsersService } from './users.service.js';
+import { PrismaService } from '../../database/prisma.service.js';
+import { Prisma } from '@prisma/client';
+
+// PrismaService is mocked here — this is a *unit* test (fast, no real DB). Integration
+// tests against a real Postgres instance belong in test:e2e (see apps/api/CLAUDE.md).
+describe('UsersService', () => {
+  let service: UsersService;
+  let prisma: { user: Record<string, ReturnType<typeof vi.fn>> };
+
+  beforeEach(async () => {
+    prisma = {
+      user: {
+        findUnique: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+
+    service = module.get(UsersService);
+  });
+
+  it('creates a user when email and username are free', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({
+      id: '1',
+      email: 'a@example.com',
+      username: 'alex',
+      passwordHash: 'hashed',
+      avatarUrl: null,
+      bio: null,
+    });
+
+    const user = await service.create({
+      email: 'a@example.com',
+      username: 'alex',
+      passwordHash: 'hashed',
+    });
+
+    expect(user.id).toBe('1');
+    expect(prisma.user.create).toHaveBeenCalledOnce();
+  });
+
+  it('rejects signup with a duplicate email', async () => {
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: '6.19.0',
+          meta: {
+            target: ['email'],
+          },
+        },
+      ),
+    );
+
+    await expect(
+      service.create({
+        email: 'taken@example.com',
+        username: 'newname',
+        passwordHash: 'x',
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('throws NotFoundException when finding a missing user by id', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    await expect(service.findById('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('strips passwordHash and email from the public representation', () => {
+    const publicUser = service.toPublicUser({
+      id: '1',
+      email: 'a@example.com',
+      username: 'alex',
+      passwordHash: 'hashed',
+      avatarUrl: null,
+      bio: 'hi',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    expect(publicUser).toEqual({ id: '1', username: 'alex', avatarUrl: null, bio: 'hi' });
+    expect(publicUser).not.toHaveProperty('email');
+    expect(publicUser).not.toHaveProperty('passwordHash');
+  });
+});
+
+
+============================================================
+FILE: apps/api/src/modules/users/users.service.ts
+============================================================
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { User } from '@prisma/client';
+import type { PublicUser } from '@parallel/shared-types';
+import { PrismaService } from '../../database/prisma.service.js';
+import type { UpdateUserDto } from './dto/update-user.dto.js';
+
+interface CreateUserInput {
+  email: string;
+  username: string;
+  passwordHash: string;
+}
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findByEmail(email: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: {
+        email: email.trim().toLowerCase(),
+      },
+    });
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: {
+        username: username.trim().toLowerCase(),
+      },
+    });
+  }
+
+  async findById(id: string): Promise<User> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  async create(data: CreateUserInput): Promise<User> {
+    const email = data.email.trim().toLowerCase();
+    const username = data.username.trim().toLowerCase();
+
+    try {
+      return await this.prisma.user.create({
+        data: {
+          email,
+          username,
+          passwordHash: data.passwordHash,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = error.meta?.target;
+
+        const fields = Array.isArray(target)
+          ? target.map(String)
+          : [String(target ?? '')];
+
+        if (fields.some((field) => field.includes('email'))) {
+          throw new ConflictException(
+            'An account with this email already exists',
+          );
+        }
+
+        if (fields.some((field) => field.includes('username'))) {
+          throw new ConflictException('This username is already taken');
+        }
+
+        throw new ConflictException('User already exists');
+      }
+
+      throw error;
+    }
+  }
+
+  async updateProfile(id: string, dto: UpdateUserDto): Promise<User> {
+    const username =
+      dto.username !== undefined
+        ? dto.username.trim().toLowerCase()
+        : undefined;
+
+    try {
+      return await this.prisma.user.update({
+        where: { id },
+        data: {
+          ...(username !== undefined && {
+            username,
+          }),
+          ...(dto.bio !== undefined && {
+            bio: dto.bio,
+          }),
+          ...(dto.avatarUrl !== undefined && {
+            avatarUrl: dto.avatarUrl,
+          }),
+          ...(dto.visibilitySettings !== undefined && {
+            visibilitySettings: {
+              ...dto.visibilitySettings,
+            },
+          }),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('This username is already taken');
+        }
+
+        if (error.code === 'P2025') {
+          throw new NotFoundException('User not found');
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  toPublicUser(user: User): PublicUser {
+    return {
+      id: user.id,
+      username: user.username,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+    };
+  }
+}
+
+
+============================================================
+FILE: apps/web/src/app/globals.css
+============================================================
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --border: #e4e4e7;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --radius: 0.75rem;
+
+  /* Per-Parallel accent colors (blueprint §14 — each Parallel gets a distinct
+     color + motion signature so switching contexts feels different). Expand this
+     set as new Parallel types are added; keep names semantic, not positional. */
+  --parallel-builder: #f59e0b;
+  --parallel-music-head: #ec4899;
+  --parallel-gamer: #22c55e;
+  --parallel-explorer: #3b82f6;
+  --parallel-urbanist: #a855f7;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #101012;
+  --card-foreground: #fafafa;
+  --border: #27272a;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
+  --primary: #a78bfa;
+  --primary-foreground: #09090b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-parallel-builder: var(--parallel-builder);
+  --color-parallel-music-head: var(--parallel-music-head);
+  --color-parallel-gamer: var(--parallel-gamer);
+  --color-parallel-explorer: var(--parallel-explorer);
+  --color-parallel-urbanist: var(--parallel-urbanist);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius-lg: var(--radius);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+
+============================================================
+FILE: apps/web/src/app/layout.tsx
+============================================================
+import type { Metadata } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import { Providers } from '@/components/providers';
+import './globals.css';
+
+const geistSans = Geist({
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+});
+
+const geistMono = Geist_Mono({
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+});
+
+export const metadata: Metadata = {
+  title: 'Parallel',
+  description: "Find the you that hasn't shown up yet.",
+};
+
+export default function RootLayout({ children }: LayoutProps<'/'>) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+    >
+      <body className="min-h-full flex flex-col bg-background text-foreground">
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+
+
+============================================================
+FILE: apps/web/src/app/login/page.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { z } from 'zod';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { login } from '@/features/auth/auth-api';
+import { api } from '@/lib/api-client';
+
+const loginSchema = z.object({
+  email: z.email('Enter a valid email address'),
+  password: z.string().min(1, 'Enter your password'),
+});
+
+type LoginForm = z.infer<typeof loginSchema>;
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+  });
+
+  const onSubmit = async (data: LoginForm) => {
+    setServerError(null);
+
+    try {
+      await login(data);
+
+      // Mirrors USER_FLOW.md Flow 1: send an unonboarded user back into onboarding
+      // at exactly the step after their last answered question, and a fully
+      // onboarded user onward. There's no Parallel Map screen yet (Phase 5/6), so
+      // "onward" is home for now — swap this for `/map` once that screen exists.
+      const status = await api.onboarding.getStatus();
+
+      if (!status.completed) {
+        router.push(`/onboarding/${status.answeredCount + 1}`);
+      } else {
+        router.push('/');
+      }
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to log in.';
+
+      setServerError(message);
+    }
+  };
+
+  return (
+    <main className="flex flex-1 items-center justify-center px-6 py-12">
+      <div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <p className="mb-3 text-sm font-medium tracking-[0.2em] text-primary uppercase">
+            Parallel
+          </p>
+
+          <h1 className="text-4xl font-semibold tracking-tight">
+            Good to see you again.
+          </h1>
+
+          <p className="mt-3 text-muted-foreground">
+            Log in to keep exploring.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="space-y-5 rounded-3xl border border-border bg-card/60 p-6 shadow-2xl backdrop-blur sm:p-8"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              {...register('email')}
+            />
+            {errors.email && (
+              <p className="text-sm text-destructive">{errors.email.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Your password"
+              {...register('password')}
+            />
+            {errors.password && (
+              <p className="text-sm text-destructive">{errors.password.message}</p>
+            )}
+          </div>
+
+          {serverError && (
+            <p
+              role="alert"
+              className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
+              {serverError}
+            </p>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className="h-12 w-full rounded-xl text-base"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Logging in...
+              </>
+            ) : (
+              <>
+                Log in
+                <ArrowRight />
+              </>
+            )}
+          </Button>
+
+          <p className="text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
+            <Link
+              href="/signup"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Sign up
+            </Link>
+          </p>
+        </form>
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: apps/web/src/app/onboarding/[step]/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api-client';
+
+export default function OnboardingStepPage() {
+  const params = useParams<{ step: string }>();
+  const router = useRouter();
+
+  const step = Number(params.step);
+
+  const [questions, setQuestions] = useState<
+    Awaited<ReturnType<typeof api.onboarding.getQuestions>>
+  >([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadQuestions() {
+      try {
+        const data = await api.onboarding.getQuestions();
+        setQuestions(data);
+      } catch {
+        setError('Could not load your questions. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadQuestions();
+  }, []);
+
+  const question = useMemo(() => questions[step - 1], [questions, step]);
+
+  async function handleContinue() {
+    if (!question || !selected || submitting) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await api.onboarding.submitAnswer({
+        questionKey: question.key,
+        answerValue: selected,
+      });
+
+      if (step < questions.length) {
+        router.push(`/onboarding/${step + 1}`);
+      } else {
+        router.push('/onboarding/reveal');
+      }
+    } catch {
+      setError('Could not save your answer. Please try again.');
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (error && !question) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-md text-center">
+          <p className="text-sm text-muted-foreground">{error}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!question) {
+    return null;
+  }
+
+  const progress = (step / questions.length) * 100;
+
+  return (
+    <main className="min-h-screen bg-background px-6 py-8">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-[var(--parallel-builder)]" />
+            <span className="font-mono text-sm font-medium tracking-tight">
+              PARALLEL
+            </span>
+          </div>
+
+          <span className="font-mono text-xs text-muted-foreground">
+            {step} / {questions.length}
+          </span>
+        </header>
+
+        <div className="mt-6 h-1 overflow-hidden rounded-full bg-muted">
+          <motion.div
+            className="h-full rounded-full bg-[var(--parallel-builder)]"
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+          />
+        </div>
+
+        <section className="flex flex-1 flex-col justify-center py-16">
+          <motion.div
+            key={question.key}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+          >
+            <p className="mb-4 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              A little signal
+            </p>
+
+            <h1 className="max-w-xl text-4xl font-semibold tracking-tight sm:text-5xl">
+              {question.question}
+            </h1>
+
+            <div className="mt-10 grid gap-3">
+              {question.options.map((option) => {
+                const isSelected = selected === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSelected(option.value)}
+                    className={[
+                      'group rounded-2xl border p-5 text-left transition-all',
+                      'hover:-translate-y-0.5 hover:border-foreground/30',
+                      isSelected
+                        ? 'border-[var(--parallel-builder)] bg-[var(--parallel-builder)]/10'
+                        : 'border-border bg-card',
+                    ].join(' ')}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="font-medium">{option.label}</span>
+
+                      <span
+                        className={[
+                          'flex size-5 items-center justify-center rounded-full border transition',
+                          isSelected
+                            ? 'border-[var(--parallel-builder)] bg-[var(--parallel-builder)]'
+                            : 'border-muted-foreground/40',
+                        ].join(' ')}
+                      >
+                        {isSelected && (
+                          <span className="size-2 rounded-full bg-background" />
+                        )}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {error && (
+              <p className="mt-4 text-sm text-destructive">{error}</p>
+            )}
+
+            <Button
+              size="lg"
+              className="mt-8 w-full sm:w-auto"
+              disabled={!selected || submitting}
+              onClick={handleContinue}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ArrowRight />
+                </>
+              )}
+            </Button>
+          </motion.div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: apps/web/src/app/page.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+import { motion } from 'framer-motion';
+import { ArrowRight, Compass, Sparkles, Users } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+const signals = [
+  { icon: Compass, label: 'Explore', color: 'text-parallel-explorer' },
+  { icon: Sparkles, label: 'Discover', color: 'text-parallel-music-head' },
+  { icon: Users, label: 'Meet', color: 'text-parallel-builder' },
+];
+
+export default function Home() {
+  return (
+    <main className="relative flex min-h-[calc(100vh-4rem)] flex-1 items-center justify-center overflow-hidden px-6 py-16">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute left-[15%] top-[25%] h-32 w-32 rounded-full bg-parallel-explorer/10 blur-3xl" />
+        <div className="absolute bottom-[15%] right-[15%] h-40 w-40 rounded-full bg-parallel-music-head/10 blur-3xl" />
+      </div>
+
+      <div className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center text-center">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/70 px-4 py-2 text-sm text-muted-foreground backdrop-blur"
+        >
+          <span className="h-2 w-2 rounded-full bg-parallel-gamer" />
+          There&apos;s more than one version of you.
+        </motion.div>
+
+        <motion.h1
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          className="max-w-3xl text-balance text-5xl font-semibold tracking-tight sm:text-6xl"
+        >
+          Find the you that hasn&apos;t shown up yet.
+        </motion.h1>
+
+        <motion.p
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl"
+        >
+          Parallel helps you discover different sides of yourself through interests,
+          people, experiences, and the worlds you could step into.
+        </motion.p>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="mt-9 flex flex-col gap-3 sm:flex-row"
+        >
+          <Button asChild size="lg" className="h-12 rounded-full px-7 text-base">
+            <Link href="/signup">
+              Get started
+              <ArrowRight />
+            </Link>
+          </Button>
+
+          <Button
+            asChild
+            variant="outline"
+            size="lg"
+            className="h-12 rounded-full px-7 text-base"
+          >
+            <Link href="/login">Log in</Link>
+          </Button>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.5 }}
+          className="mt-16 grid grid-cols-3 gap-3 sm:gap-6"
+        >
+          {signals.map(({ icon: Icon, label, color }) => (
+            <div
+              key={label}
+              className="flex min-w-24 flex-col items-center gap-2 rounded-2xl border border-border/70 bg-card/50 px-5 py-4 backdrop-blur"
+            >
+              <Icon className={`size-5 ${color}`} />
+              <span className="text-sm font-medium">{label}</span>
+            </div>
+          ))}
+        </motion.div>
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: apps/web/src/app/signup/page.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { z } from 'zod';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { signup } from '@/features/auth/auth-api';
+
+const signupSchema = z
+  .object({
+    email: z.email('Enter a valid email address'),
+    username: z
+      .string()
+      .min(3, 'Username must be at least 3 characters')
+      .max(30, 'Username must be at most 30 characters'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+
+type SignupForm = z.infer<typeof signupSchema>;
+
+export default function SignupPage() {
+  const router = useRouter();
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<SignupForm>({
+    resolver: zodResolver(signupSchema),
+  });
+
+  const onSubmit = async (data: SignupForm) => {
+    setServerError(null);
+
+    try {
+      await signup({
+        email: data.email,
+        username: data.username,
+        password: data.password,
+      });
+
+      router.push('/onboarding/1');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to create your account.';
+
+      setServerError(message);
+    }
+  };
+
+  return (
+    <main className="flex flex-1 items-center justify-center px-6 py-12">
+      <div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <p className="mb-3 text-sm font-medium tracking-[0.2em] text-primary uppercase">
+            Parallel
+          </p>
+
+          <h1 className="text-4xl font-semibold tracking-tight">
+            Meet another side of you.
+          </h1>
+
+          <p className="mt-3 text-muted-foreground">
+            Create your account and start discovering.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="space-y-5 rounded-3xl border border-border bg-card/60 p-6 shadow-2xl backdrop-blur sm:p-8"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              {...register('email')}
+            />
+            {errors.email && (
+              <p className="text-sm text-destructive">{errors.email.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              type="text"
+              autoComplete="username"
+              placeholder="yourname"
+              {...register('username')}
+            />
+            {errors.username && (
+              <p className="text-sm text-destructive">{errors.username.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              {...register('password')}
+            />
+            {errors.password && (
+              <p className="text-sm text-destructive">{errors.password.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword">Confirm password</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Enter your password again"
+              {...register('confirmPassword')}
+            />
+            {errors.confirmPassword && (
+              <p className="text-sm text-destructive">
+                {errors.confirmPassword.message}
+              </p>
+            )}
+          </div>
+
+          {serverError && (
+            <p
+              role="alert"
+              className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
+              {serverError}
+            </p>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className="h-12 w-full rounded-xl text-base"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Creating account...
+              </>
+            ) : (
+              <>
+                Start discovering
+                <ArrowRight />
+              </>
+            )}
+          </Button>
+
+          <p className="text-center text-sm text-muted-foreground">
+            Already have an account?{' '}
+            <Link
+              href="/login"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Log in
+            </Link>
+          </p>
+        </form>
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: apps/web/src/components/providers.tsx
+============================================================
+'use client';
+
+// Client-side providers, mounted once from the root layout. Kept separate from
+// layout.tsx (a Server Component) so the server/client boundary is explicit —
+// see apps/web/CLAUDE.md for the Server vs. Client Component convention.
+import { useState, type ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+export function Providers({ children }: { children: ReactNode }) {
+  // Created once per component instance (not per render) via useState, and scoped
+  // to the client so server-rendered and client-rendered trees never share a cache
+  // instance — the standard TanStack Query + Next.js App Router pattern.
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 60 * 1000,
+            retry: 1,
+          },
+        },
+      }),
+  );
+
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+}
+
+
+============================================================
+FILE: apps/web/src/components/ui/button.tsx
+============================================================
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { cn } from "cn"
+import { Slot } from "radix-ui"
+
+const buttonVariants = cva(
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive:
+          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
+        outline:
+          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost:
+          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-9 px-4 py-2 has-[>svg]:px-3",
+        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
+        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+        icon: "size-9",
+        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-8",
+        "icon-lg": "size-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+function Button({
+  className,
+  variant = "default",
+  size = "default",
+  asChild = false,
+  ...props
+}: React.ComponentProps<"button"> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const Comp = asChild ? Slot.Root : "button"
+
+  return (
+    <Comp
+      data-slot="button"
+      data-variant={variant}
+      data-size={size}
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props}
+    />
+  )
+}
+
+export { Button, buttonVariants }
+
+
+============================================================
+FILE: apps/web/src/components/ui/input.tsx
+============================================================
+import * as React from "react"
+import { cn } from "cn"
+
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
+    <input
+      type={type}
+      data-slot="input"
+      className={cn(
+        "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30",
+        "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Input }
+
+
+============================================================
+FILE: apps/web/src/components/ui/label.tsx
+============================================================
+"use client"
+
+import * as React from "react"
+import { cn } from "cn"
+import { Label as LabelPrimitive } from "radix-ui"
+
+function Label({
+  className,
+  ...props
+}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+  return (
+    <LabelPrimitive.Root
+      data-slot="label"
+      className={cn(
+        "flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Label }
+
+
+============================================================
+FILE: apps/web/src/features/auth/__tests__/api-client.test.ts
+============================================================
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
+
+const getState = vi.fn();
+
+vi.mock('@/features/auth/auth-store', () => ({
+  useAuthStore: {
+    getState,
+  },
+}));
+
+describe('apiClient', () => {
+  beforeEach(() => {
+    getState.mockReset();
+  });
+
+  it('adds the access token as a Bearer authorization header', async () => {
+    getState.mockReturnValue({
+      accessToken: 'test-token',
+    });
+
+    const { apiClient } = await import('@/lib/api-client');
+
+    const interceptor = apiClient.interceptors.request.handlers?.[0]?.fulfilled;
+
+    expect(interceptor).toBeDefined();
+
+    const config = await interceptor!(
+      {
+        headers: new AxiosHeaders(),
+      } as InternalAxiosRequestConfig,
+    );
+
+    expect(config.headers.Authorization).toBe('Bearer test-token');
+  });
+
+  it('does not add an authorization header without a token', async () => {
+    getState.mockReturnValue({
+      accessToken: null,
+    });
+
+    const { apiClient } = await import('@/lib/api-client');
+
+    const interceptor = apiClient.interceptors.request.handlers?.[0]?.fulfilled;
+
+    expect(interceptor).toBeDefined();
+
+    const config = await interceptor!(
+      {
+        headers: new AxiosHeaders(),
+      } as InternalAxiosRequestConfig,
+    );
+
+    expect(config.headers.Authorization).toBeUndefined();
+  });
+});
+
+describe('apiClient response interceptor', () => {
+  beforeEach(() => {
+    getState.mockReturnValue({ accessToken: null });
+  });
+
+  it('extracts the backend message so callers see the real error, not axios generic text', async () => {
+    const { apiClient } = await import('@/lib/api-client');
+    const rejected = apiClient.interceptors.response.handlers?.[0]?.rejected;
+
+    expect(rejected).toBeDefined();
+
+    const axiosError = {
+      isAxiosError: true,
+      response: { data: { message: 'Invalid email or password' } },
+    };
+
+    await expect(rejected!(axiosError)).rejects.toThrow('Invalid email or password');
+  });
+
+  it('joins an array of validation messages into one readable string', async () => {
+    const { apiClient } = await import('@/lib/api-client');
+    const rejected = apiClient.interceptors.response.handlers?.[0]?.rejected;
+
+    const axiosError = {
+      isAxiosError: true,
+      response: { data: { message: ['email must be an email', 'password is too short'] } },
+    };
+
+    await expect(rejected!(axiosError)).rejects.toThrow(
+      'email must be an email password is too short',
+    );
+  });
+});
+
+
+============================================================
+FILE: apps/web/src/features/auth/__tests__/auth-store.test.ts
+============================================================
+import { beforeEach, describe, expect, it } from 'vitest';
+import { useAuthStore } from '../auth-store';
+
+const user = {
+  id: 'user-1',
+  username: 'alex',
+  avatarUrl: null,
+  bio: null,
+};
+
+describe('useAuthStore', () => {
+  beforeEach(() => {
+    useAuthStore.getState().clearAuth();
+  });
+
+  it('starts unauthenticated', () => {
+    const state = useAuthStore.getState();
+
+    expect(state.user).toBeNull();
+    expect(state.accessToken).toBeNull();
+    expect(state.isAuthenticated).toBe(false);
+  });
+
+  it('stores authenticated user and token', () => {
+    useAuthStore.getState().setAuth(user, 'test-token');
+
+    const state = useAuthStore.getState();
+
+    expect(state.user).toEqual(user);
+    expect(state.accessToken).toBe('test-token');
+    expect(state.isAuthenticated).toBe(true);
+  });
+
+  it('clears authentication state', () => {
+    useAuthStore.getState().setAuth(user, 'test-token');
+    useAuthStore.getState().clearAuth();
+
+    const state = useAuthStore.getState();
+
+    expect(state.user).toBeNull();
+    expect(state.accessToken).toBeNull();
+    expect(state.isAuthenticated).toBe(false);
+  });
+});
+
+
+============================================================
+FILE: apps/web/src/features/auth/auth-api.ts
+============================================================
+import type {
+  AuthResult,
+  LoginDto,
+  SignupDto,
+} from '@parallel/shared-types';
+import { api } from '@/lib/api-client';
+import { useAuthStore } from './auth-store';
+
+export async function signup(dto: SignupDto): Promise<AuthResult> {
+  const result = await api.auth.signup(dto);
+
+  useAuthStore.getState().setAuth(result.user, result.accessToken);
+
+  return result;
+}
+
+export async function login(dto: LoginDto): Promise<AuthResult> {
+  const result = await api.auth.login(dto);
+
+  useAuthStore.getState().setAuth(result.user, result.accessToken);
+
+  return result;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await api.auth.logout();
+  } finally {
+    useAuthStore.getState().clearAuth();
+  }
+}
+
+
+============================================================
+FILE: apps/web/src/features/auth/auth-store.ts
+============================================================
+'use client';
+
+import { create } from 'zustand';
+import type { AuthState } from './types';
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  accessToken: null,
+  isAuthenticated: false,
+
+  setAuth: (user, accessToken) =>
+    set({
+      user,
+      accessToken,
+      isAuthenticated: true,
+    }),
+
+  clearAuth: () =>
+    set({
+      user: null,
+      accessToken: null,
+      isAuthenticated: false,
+    }),
+}));
+
+
+============================================================
+FILE: apps/web/src/features/auth/components/auth-form.tsx
+============================================================
+
+
+============================================================
+FILE: apps/web/src/features/auth/components/auth-shell.tsx
+============================================================
+
+
+============================================================
+FILE: apps/web/src/features/auth/types.ts
+============================================================
+import type { PublicUser } from '@parallel/shared-types';
+
+export interface AuthState {
+  user: PublicUser | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  setAuth: (user: PublicUser, accessToken: string) => void;
+  clearAuth: () => void;
+}
+
+
+============================================================
+FILE: apps/web/src/lib/api-client.ts
+============================================================
+import axios from 'axios';
+import { createParallelApi } from '@parallel/api-client';
+import { useAuthStore } from '@/features/auth/auth-store';
+
+export const apiClient = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001',
+  withCredentials: true,
+});
+
+apiClient.interceptors.request.use((config) => {
+  const accessToken = useAuthStore.getState().accessToken;
+
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // AllExceptionsFilter (apps/api/src/common/filters/all-exceptions.filter.ts)
+    // always returns { statusCode, path, timestamp, message, error? } — message is
+    // either a plain string or a string[] (class-validator's ValidationPipe errors).
+    // Without this, every caller sees axios's generic "Request failed with status
+    // code 401" instead of "Invalid email or password" etc. — pull the real message
+    // out here once, so every page (signup, login, everything after) gets it for free
+    // instead of each one re-parsing error.response.data itself.
+    if (axios.isAxiosError(error)) {
+      const body = error.response?.data as { message?: string | string[] } | undefined;
+      if (body?.message) {
+        const message = Array.isArray(body.message) ? body.message.join(' ') : body.message;
+        return Promise.reject(new Error(message));
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
+export const api = createParallelApi(apiClient);
+
+
+============================================================
+FILE: apps/web/src/lib/utils.ts
+============================================================
+// shadcn/ui's expected className-merge helper — combines clsx (conditional classes)
+// with tailwind-merge (resolves conflicting Tailwind classes sanely). Used by every
+// shadcn component as `cn(...)`.
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+
+============================================================
+FILE: packages/api-client/dist/index.d.ts
+============================================================
+import { AxiosInstance } from 'axios';
+import { SignupDto, AuthResult, LoginDto, HealthResponse, ParallelMapResponse, OnboardingQuestion, OnboardingAnswerDto, OnboardingStatusDto, CreateIdentityCardDto, IdentityCardDto, WrappedRecapDto } from '@parallel/shared-types';
+export * from '@parallel/shared-types';
+
+declare function createParallelApi(http: AxiosInstance): {
+    auth: {
+        signup: (dto: SignupDto) => Promise<AuthResult>;
+        login: (dto: LoginDto) => Promise<AuthResult>;
+        logout: () => Promise<void>;
+    };
+    health: {
+        check: () => Promise<HealthResponse>;
+    };
+    parallels: {
+        getMap: () => Promise<ParallelMapResponse>;
+    };
+    onboarding: {
+        getQuestions: () => Promise<OnboardingQuestion[]>;
+        submitAnswer: (answer: OnboardingAnswerDto) => Promise<void>;
+        getStatus: () => Promise<OnboardingStatusDto>;
+    };
+    cards: {
+        create: (dto: CreateIdentityCardDto) => Promise<{
+            jobId: string;
+        }>;
+        get: (id: string) => Promise<IdentityCardDto>;
+    };
+    wrapped: {
+        get: (id: string) => Promise<WrappedRecapDto>;
+        latest: () => Promise<WrappedRecapDto | null>;
+    };
+};
+type ParallelApi = ReturnType<typeof createParallelApi>;
+
+export { type ParallelApi, createParallelApi };
+
+
+============================================================
+FILE: packages/api-client/src/index.ts
+============================================================
+// Factory rather than a singleton: the consuming app (apps/web) provides its own axios
+// instance (with the right baseURL/interceptors — see apps/web/src/lib/api-client.ts),
+// this package just wraps it in typed, reusable request functions and query hooks.
+import type { AxiosInstance } from 'axios';
+import type {
+  ApiResponse,
+  AuthResult,
+  CreateIdentityCardDto,
+  HealthResponse,
+  IdentityCardDto,
+  LoginDto,
+  OnboardingAnswerDto,
+  OnboardingQuestion,
+  OnboardingStatusDto,
+  ParallelMapResponse,
+  SignupDto,
+  WrappedRecapDto,
+} from '@parallel/shared-types';
+
+export function createParallelApi(http: AxiosInstance) {
+  return {
+    auth: {
+      signup: async (dto: SignupDto): Promise<AuthResult> => {
+        const { data } = await http.post<ApiResponse<AuthResult>>(
+          '/v1/auth/signup',
+          dto,
+        );
+        return data.data;
+      },
+
+      login: async (dto: LoginDto): Promise<AuthResult> => {
+        const { data } = await http.post<ApiResponse<AuthResult>>(
+          '/v1/auth/login',
+          dto,
+        );
+        return data.data;
+      },
+
+      logout: async (): Promise<void> => {
+        await http.post('/v1/auth/logout');
+      },
+    },
+
+    health: {
+      check: async (): Promise<HealthResponse> => {
+        const { data } = await http.get<HealthResponse>('/v1/health');
+        return data;
+      },
+    },
+    parallels: {
+      // Fill in as the /parallels endpoints land (blueprint Phase 5/6).
+      getMap: async (): Promise<ParallelMapResponse> => {
+        const { data } = await http.get<ParallelMapResponse>('/v1/parallels/map');
+        return data;
+      },
+    },
+    onboarding: {
+      getQuestions: async (): Promise<OnboardingQuestion[]> => {
+        const { data } = await http.get<OnboardingQuestion[]>(
+          '/v1/onboarding/questions',
+        );
+        return data;
+      },
+
+      submitAnswer: async (answer: OnboardingAnswerDto): Promise<void> => {
+        await http.post('/v1/onboarding/answers', answer);
+      },
+
+      // Note: unlike auth.*, onboarding's controller doesn't use the apiResponse()
+      // envelope (see API.md §1/§3) — this is a known, deliberate-for-now split
+      // convention, not a bug. Reads the response raw, same as getQuestions above.
+      getStatus: async (): Promise<OnboardingStatusDto> => {
+        const { data } = await http.get<OnboardingStatusDto>('/v1/onboarding/status');
+        return data;
+      },
+    },
+    cards: {
+      create: async (dto: CreateIdentityCardDto): Promise<{ jobId: string }> => {
+        const { data } = await http.post<{ jobId: string }>('/v1/cards', dto);
+        return data;
+      },
+      get: async (id: string): Promise<IdentityCardDto> => {
+        const { data } = await http.get<IdentityCardDto>(`/v1/cards/${id}`);
+        return data;
+      },
+    },
+    wrapped: {
+      get: async (id: string): Promise<WrappedRecapDto> => {
+        const { data } = await http.get<WrappedRecapDto>(`/v1/wrapped/${id}`);
+        return data;
+      },
+      latest: async (): Promise<WrappedRecapDto | null> => {
+        const { data } = await http.get<WrappedRecapDto | null>('/v1/wrapped/latest');
+        return data;
+      },
+    },
+  };
+}
+
+export type ParallelApi = ReturnType<typeof createParallelApi>;
+
+export * from '@parallel/shared-types';
+
+
+============================================================
+FILE: packages/shared-types/dist/index.d.ts
+============================================================
+interface PublicUser {
+    id: string;
+    username: string;
+    avatarUrl: string | null;
+    bio: string | null;
+}
+interface AuthResult {
+    user: PublicUser;
+    accessToken: string;
+}
+interface ApiResponse<T> {
+    success: true;
+    message: string;
+    data: T;
+}
+interface SignupDto {
+    email: string;
+    username: string;
+    password: string;
+}
+interface LoginDto {
+    email: string;
+    password: string;
+}
+interface ParallelTypeDto {
+    id: string;
+    name: string;
+    description: string;
+    icon: string | null;
+}
+interface UserParallelDto {
+    id: string;
+    parallelType: ParallelTypeDto;
+    strengthPct: number;
+    momentum: number;
+    streakCount: number;
+    isGhost: boolean;
+    isHidden: boolean;
+    dismissedAt: string | null;
+    suggestionReason: string | null;
+    discoveredAt: string;
+}
+interface ParallelMapResponse {
+    user: PublicUser;
+    parallels: UserParallelDto[];
+}
+interface OnboardingAnswerDto {
+    questionKey: string;
+    answerValue: string;
+}
+interface OnboardingQuestionOption {
+    value: string;
+    label: string;
+}
+interface OnboardingQuestion {
+    key: string;
+    question: string;
+    options: OnboardingQuestionOption[];
+}
+type IdentityCardType = 'PARALLEL' | 'QUEST' | 'WRAPPED' | 'TWIN' | 'COLLAB';
+interface IdentityCardDto {
+    id: string;
+    cardType: IdentityCardType;
+    sourceType: string | null;
+    sourceId: string | null;
+    imageUrl: string;
+    createdAt: string;
+}
+interface CreateIdentityCardDto {
+    cardType: IdentityCardType;
+    sourceId: string;
+}
+type WrappedPeriod = 'MONTHLY' | 'ANNUAL';
+interface WrappedHighlights {
+    biggestEvolution: {
+        parallelTypeId: string;
+        deltaPct: number;
+    } | null;
+    mostExplored: {
+        parallelTypeId: string;
+        interactionCount: number;
+    } | null;
+    weirdestIntersection: {
+        parallelTypeIds: string[];
+        note: string;
+    } | null;
+    streakHighlight: {
+        parallelTypeId: string;
+        streakCount: number;
+    } | null;
+    twinId: string | null;
+    narrativeCopy: string;
+}
+interface WrappedRecapDto {
+    id: string;
+    period: WrappedPeriod;
+    periodStart: string;
+    periodEnd: string;
+    highlights: WrappedHighlights;
+    createdAt: string;
+}
+interface HealthResponse {
+    status: 'ok' | 'degraded';
+    timestamp: string;
+    dependencies: {
+        database: 'ok' | 'unreachable';
+        redis: 'ok' | 'unreachable';
+    };
+}
+interface OnboardingStatusDto {
+    completed: boolean;
+    answeredCount: number;
+    totalQuestions: number;
+    answers: OnboardingAnswerDto[];
+}
+interface OnboardingStatusDto {
+    completed: boolean;
+    answeredCount: number;
+    totalQuestions: number;
+    answers: Array<{
+        questionKey: string;
+        answerValue: string;
+    }>;
+}
+
+export type { ApiResponse, AuthResult, CreateIdentityCardDto, HealthResponse, IdentityCardDto, IdentityCardType, LoginDto, OnboardingAnswerDto, OnboardingQuestion, OnboardingQuestionOption, OnboardingStatusDto, ParallelMapResponse, ParallelTypeDto, PublicUser, SignupDto, UserParallelDto, WrappedHighlights, WrappedPeriod, WrappedRecapDto };
+
+
+============================================================
+FILE: packages/shared-types/src/index.ts
+============================================================
+// Shared API contract types — the single place DTOs live so apps/web and apps/api
+// (and later apps/mobile) never drift out of sync. Expand this as real endpoints are
+// built (Phase 5+, blueprint §16); these are deliberately minimal starter shapes.
+//
+// Keep this package free of NestJS/Prisma-specific types — it should be importable
+// from the browser bundle with zero server-only dependencies.
+
+export interface PublicUser {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  bio: string | null;
+}
+
+export interface AuthResult {
+  user: PublicUser;
+  accessToken: string;
+}
+
+export interface ApiResponse<T> {
+  success: true;
+  message: string;
+  data: T;
+}
+
+export interface SignupDto {
+  email: string;
+  username: string;
+  password: string;
+}
+
+export interface LoginDto {
+  email: string;
+  password: string;
+}
+
+export interface ParallelTypeDto {
+  id: string;
+  name: string;
+  description: string;
+  icon: string | null;
+}
+
+export interface UserParallelDto {
+  id: string;
+  parallelType: ParallelTypeDto;
+  strengthPct: number;
+  momentum: number;
+  streakCount: number;
+  isGhost: boolean;
+  isHidden: boolean;
+  dismissedAt: string | null; // set = permanently rejected/removed (see DATABASE.md §2.3); null = active/suggested
+  suggestionReason: string | null;
+  discoveredAt: string; // ISO date string over the wire
+}
+
+export interface ParallelMapResponse {
+  user: PublicUser;
+  parallels: UserParallelDto[];
+}
+
+export interface OnboardingAnswerDto {
+  questionKey: string;
+  answerValue: string;
+}
+
+export interface OnboardingStatusDto {
+  completed: boolean;
+  answeredCount: number;
+  totalQuestions: number;
+  answers: OnboardingAnswerDto[];
+}
+
+export interface OnboardingQuestionOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingQuestion {
+  key: string;
+  question: string;
+  options: OnboardingQuestionOption[];
+}
+
+// Matches IdentityCardType in schema.prisma — keep in sync.
+export type IdentityCardType = 'PARALLEL' | 'QUEST' | 'WRAPPED' | 'TWIN' | 'COLLAB';
+
+export interface IdentityCardDto {
+  id: string;
+  cardType: IdentityCardType;
+  sourceType: string | null;
+  sourceId: string | null;
+  imageUrl: string;
+  createdAt: string;
+}
+
+export interface CreateIdentityCardDto {
+  cardType: IdentityCardType;
+  sourceId: string;
+}
+
+// Matches WrappedPeriod in schema.prisma.
+export type WrappedPeriod = 'MONTHLY' | 'ANNUAL';
+
+// Mirrors the shape of ParallelWrapped.highlights (see DATABASE.md §2.7 / schema.prisma comment) —
+// kept as a distinct interface here (rather than `unknown`/`Json`) so the frontend gets real
+// autocomplete on Wrapped fields. Update both places together if the highlight set changes.
+export interface WrappedHighlights {
+  biggestEvolution: { parallelTypeId: string; deltaPct: number } | null;
+  mostExplored: { parallelTypeId: string; interactionCount: number } | null;
+  weirdestIntersection: { parallelTypeIds: string[]; note: string } | null;
+  streakHighlight: { parallelTypeId: string; streakCount: number } | null;
+  twinId: string | null;
+  narrativeCopy: string;
+}
+
+export interface WrappedRecapDto {
+  id: string;
+  period: WrappedPeriod;
+  periodStart: string;
+  periodEnd: string;
+  highlights: WrappedHighlights;
+  createdAt: string;
+}
+
+export interface HealthResponse {
+  status: 'ok' | 'degraded';
+  timestamp: string;
+  dependencies: {
+    database: 'ok' | 'unreachable';
+    redis: 'ok' | 'unreachable';
+  };
+}
+
+export interface OnboardingStatusDto {
+  completed: boolean;
+  answeredCount: number;
+  totalQuestions: number;
+  answers: Array<{
+    questionKey: string;
+    answerValue: string;
+  }>;
+}
+
+
+============================================================
+FILE: packages/ui/dist/index.d.ts
+============================================================
+
+export {  }
+
+
+============================================================
+FILE: packages/ui/src/index.ts
+============================================================
+// Empty on purpose at Phase 4. Promote a component here from apps/web/src/components/ui
+// once it's genuinely needed by a second app (mobile) — not before, to avoid premature
+// abstraction. See package.json description for the reasoning.
+export {};
+

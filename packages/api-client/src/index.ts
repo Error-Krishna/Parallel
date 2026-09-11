@@ -3,16 +3,44 @@
 // this package just wraps it in typed, reusable request functions and query hooks.
 import type { AxiosInstance } from 'axios';
 import type {
-  HealthResponse,
-  ParallelMapResponse,
-  OnboardingAnswerDto,
-  IdentityCardDto,
+  ApiResponse,
+  AuthResult,
   CreateIdentityCardDto,
+  HealthResponse,
+  IdentityCardDto,
+  LoginDto,
+  OnboardingAnswerDto,
+  OnboardingQuestion,
+  OnboardingStatusDto,
+  ParallelMapResponse,
+  SignupDto,
   WrappedRecapDto,
 } from '@parallel/shared-types';
 
 export function createParallelApi(http: AxiosInstance) {
   return {
+    auth: {
+      signup: async (dto: SignupDto): Promise<AuthResult> => {
+        const { data } = await http.post<ApiResponse<AuthResult>>(
+          '/v1/auth/signup',
+          dto,
+        );
+        return data.data;
+      },
+
+      login: async (dto: LoginDto): Promise<AuthResult> => {
+        const { data } = await http.post<ApiResponse<AuthResult>>(
+          '/v1/auth/login',
+          dto,
+        );
+        return data.data;
+      },
+
+      logout: async (): Promise<void> => {
+        await http.post('/v1/auth/logout');
+      },
+    },
+
     health: {
       check: async (): Promise<HealthResponse> => {
         const { data } = await http.get<HealthResponse>('/v1/health');
@@ -27,8 +55,23 @@ export function createParallelApi(http: AxiosInstance) {
       },
     },
     onboarding: {
+      getQuestions: async (): Promise<OnboardingQuestion[]> => {
+        const { data } = await http.get<OnboardingQuestion[]>(
+          '/v1/onboarding/questions',
+        );
+        return data;
+      },
+
       submitAnswer: async (answer: OnboardingAnswerDto): Promise<void> => {
         await http.post('/v1/onboarding/answers', answer);
+      },
+
+      // Note: unlike auth.*, onboarding's controller doesn't use the apiResponse()
+      // envelope (see API.md §1/§3) — this is a known, deliberate-for-now split
+      // convention, not a bug. Reads the response raw, same as getQuestions above.
+      getStatus: async (): Promise<OnboardingStatusDto> => {
+        const { data } = await http.get<OnboardingStatusDto>('/v1/onboarding/status');
+        return data;
       },
     },
     cards: {

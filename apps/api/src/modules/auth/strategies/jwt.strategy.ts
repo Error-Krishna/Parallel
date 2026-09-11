@@ -33,7 +33,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const { jwt } = appConfig;
 
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: (request) =>
+        ExtractJwt.fromAuthHeaderAsBearerToken()(request) ??
+        (request as typeof request & {
+          cookies?: { accessToken?: string };
+        }).cookies?.accessToken,
       ignoreExpiration: false,
       secretOrKey: jwt.secret,
       issuer: jwt.issuer,

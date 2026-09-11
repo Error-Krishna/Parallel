@@ -30,5 +30,6 @@ import type { AppConfig } from '../../config/configuration.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
+  exports: [PassportModule],
 })
 export class AuthModule {}

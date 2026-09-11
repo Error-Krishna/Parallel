@@ -1,18 +1,42 @@
-// Shared axios instance for talking to the NestJS API (apps/api). Feature code should
-// import this rather than creating its own axios/fetch calls — keeps auth headers,
-// base URL, and error handling in one place. See packages/api-client for typed,
-// query-hook wrappers built on top of this once that package has real endpoints to wrap.
 import axios from 'axios';
+import { createParallelApi } from '@parallel/api-client';
+import { useAuthStore } from '@/features/auth/auth-store';
 
 export const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001',
   withCredentials: true,
 });
 
+apiClient.interceptors.request.use((config) => {
+  const accessToken = useAuthStore.getState().accessToken;
+
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  return config;
+});
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Centralize auth-expiry / network-error handling here as auth (Phase 4/5) lands.
+    // AllExceptionsFilter (apps/api/src/common/filters/all-exceptions.filter.ts)
+    // always returns { statusCode, path, timestamp, message, error? } — message is
+    // either a plain string or a string[] (class-validator's ValidationPipe errors).
+    // Without this, every caller sees axios's generic "Request failed with status
+    // code 401" instead of "Invalid email or password" etc. — pull the real message
+    // out here once, so every page (signup, login, everything after) gets it for free
+    // instead of each one re-parsing error.response.data itself.
+    if (axios.isAxiosError(error)) {
+      const body = error.response?.data as { message?: string | string[] } | undefined;
+      if (body?.message) {
+        const message = Array.isArray(body.message) ? body.message.join(' ') : body.message;
+        return Promise.reject(new Error(message));
+      }
+    }
+
     return Promise.reject(error);
   },
 );
+
+export const api = createParallelApi(apiClient);

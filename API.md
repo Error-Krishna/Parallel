@@ -56,27 +56,27 @@ Everything else in this document below §3 is spec, not yet built — update thi
 
 ## 3. Auth (`modules/auth`, `modules/users`) — ✅ implemented
 
-Endpoints listed in §2 above. Hashing: **bcryptjs** (pure JS, 12 salt rounds) — chosen over `argon2`/`bcrypt` specifically to avoid native-module build friction in this monorepo (same class of issue as the Prisma CLI note in `apps/api/CLAUDE.md`). Passwords are never logged or returned in any response — `UsersService.toPublicUser()` strips both `passwordHash` and `email` before anything reaches a controller response.
+Endpoints listed in §2 above. Hashing: **bcryptjs** (pure JS — chosen over `argon2`/`bcrypt` to avoid native-module build friction, same class of issue as the Prisma CLI note in `apps/api/CLAUDE.md`). Salt rounds are configurable via `BCRYPT_SALT_ROUNDS` (`config/configuration.ts`) — **the in-source default is 12**, the production-appropriate value; only override it lower in CI/test env for speed (see `.github/workflows/ci.yml`), never in a real `.env`. Email and username are normalized (`trim().toLowerCase()`) before lookup/storage, so `Alex@Example.com` and `alex@example.com` can't both sign up as distinct accounts. Passwords are never logged or returned in any response — `UsersService.toPublicUser()` strips both `passwordHash` and `email` before anything reaches a controller response (verified directly by an e2e assertion, not just a unit test's claim).
 
-Tokens: JWT via `@nestjs/jwt`, `Authorization: Bearer <token>`, secret/expiry/issuer/audience from `JWT_SECRET`/`JWT_EXPIRES_IN`/`JWT_ISSUER`/`JWT_AUDIENCE` (`apps/api/.env`). The signed payload is deliberately minimal — just `{ sub: userId }`, no `username` — since a token issued before a username change would otherwise carry a stale value for its entire remaining lifetime; look up anything beyond the user's ID via `UsersService`. `main.ts` refuses to boot if `JWT_SECRET` is missing or shorter than 32 characters, and `JwtStrategy` rejects any token whose issuer/audience don't match, even if the signature is otherwise valid.
+Tokens: JWT via `@nestjs/jwt`, `Authorization: Bearer <token>`, secret/expiry/issuer/audience from `JWT_SECRET`/`JWT_EXPIRES_IN`/`JWT_ISSUER`/`JWT_AUDIENCE` (`apps/api/.env`). The signed payload is deliberately minimal — `{ sub: userId, jti: <random> }`, no `username` — since a token issued before a username change would otherwise carry a stale value for its entire remaining lifetime; look up anything beyond the user's ID via `UsersService`. `main.ts` refuses to boot if `JWT_SECRET` is missing or shorter than 32 characters, and `JwtStrategy` rejects any token whose issuer/audience don't match, even if the signature is otherwise valid.
 
-Verified per-request by `JwtStrategy` (`modules/auth/strategies/jwt.strategy.ts`) and enforced with `@UseGuards(JwtAuthGuard)` — see `UsersController` for the pattern to copy in every future protected controller. The decoded payload becomes `request.user` (just `{ id }`), retrievable in any controller via the `@CurrentUser()` decorator (`common/decorators/current-user.decorator.ts`).
+**Logout is real, server-side revocation — not a client-side no-op.** Each token carries a `jti` (JWT ID); `POST /v1/auth/logout` writes `auth:revoked:<jti>` into Redis with a TTL equal to the token's remaining lifetime. `JwtStrategy` checks this key on _every_ authenticated request, so a logged-out token stops working immediately rather than staying valid until its natural expiry. This means every protected request costs one Redis round-trip; if Redis is unreachable, `JwtStrategy` fails closed (`503`, never a silent pass-through) — the deliberate tradeoff of a stateless-JWT-plus-revocation-list hybrid.
+
+Verified per-request by `JwtStrategy` (`modules/auth/strategies/jwt.strategy.ts`) and enforced with `@UseGuards(JwtAuthGuard)` — see `UsersController` for the pattern to copy in every future protected controller. The decoded payload becomes `request.user` (`{ id, jti, exp }`), retrievable in any controller via the `@CurrentUser()` decorator (`common/decorators/current-user.decorator.ts`).
 
 Same error message ("Invalid email or password") for both a nonexistent email and a wrong password — deliberate, prevents account enumeration.
 
 Username rules (`common/validators/username.validator.ts`'s `@IsUsername()`) are shared between `SignupDto` and `UpdateUserDto` — kept as one decorator specifically so "create" and "edit" can't drift apart the way they once did.
 
-**Known gap, deferred to Phase 10 Hardening**: logout is stateless (client just discards the token) — a stolen token stays valid until it expires. Revisit with a Redis-backed blocklist (keyed on a token ID, TTL = remaining token life) before this matters in production, not before.
-
 ---
 
-## 4. Onboarding (Phase 5 — `modules/onboarding`)
+## 4. Onboarding — ✅ implemented (no Identity Engine scoring yet, see note below)
 
-| Method | Path                       | Auth | Request                                            | Response                                                                                                                              |
-| ------ | -------------------------- | ---- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/v1/onboarding/questions` | 🔒   | —                                                  | ordered list of onboarding questions (static/config-driven, not user-specific)                                                        |
-| `POST` | `/v1/onboarding/answers`   | 🔒   | `OnboardingAnswerDto { questionKey, answerValue }` | `204 No Content` — persists one answer; called once per question as the user progresses (see `USER_FLOW.md` Flow 2's resume behavior) |
-| `POST` | `/v1/onboarding/complete`  | 🔒   | —                                                  | triggers the first-pass rules-based Identity Engine scoring job, returns once the initial map is ready: `ParallelMapResponse`         |
+| Method | Path                       | Auth | Request                                            | Response                                                                                                                                                                                       |
+| ------ | -------------------------- | ---- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/onboarding/questions` | 🔒   | —                                                  | `OnboardingQuestion[]`, static/config-driven, not user-specific. **Unwrapped** — not behind the success envelope (see §1), a deliberate split from `auth`/`users` for now                      |
+| `POST` | `/v1/onboarding/answers`   | 🔒   | `OnboardingAnswerDto { questionKey, answerValue }` | `204 No Content` — upserts one answer (resubmitting the same `questionKey` overwrites, never duplicates); rejects an unknown `questionKey` or an `answerValue` outside that question's options |
+| `GET`  | `/v1/onboarding/status`    | 🔒   | —                                                  | `OnboardingStatusDto { completed, answeredCount, totalQuestions, answers }` — also unwrapped. `apps/web`'s login flow calls this to route a returning user (`app/login/page.tsx`)              |
 
 ---
 

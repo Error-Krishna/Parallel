@@ -12,6 +12,28 @@ export interface PublicUser {
   bio: string | null;
 }
 
+export interface AuthResult {
+  user: PublicUser;
+  accessToken: string;
+}
+
+export interface ApiResponse<T> {
+  success: true;
+  message: string;
+  data: T;
+}
+
+export interface SignupDto {
+  email: string;
+  username: string;
+  password: string;
+}
+
+export interface LoginDto {
+  email: string;
+  password: string;
+}
+
 export interface ParallelTypeDto {
   id: string;
   name: string;
@@ -40,6 +62,24 @@ export interface ParallelMapResponse {
 export interface OnboardingAnswerDto {
   questionKey: string;
   answerValue: string;
+}
+
+export interface OnboardingStatusDto {
+  completed: boolean;
+  answeredCount: number;
+  totalQuestions: number;
+  answers: OnboardingAnswerDto[];
+}
+
+export interface OnboardingQuestionOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingQuestion {
+  key: string;
+  question: string;
+  options: OnboardingQuestionOption[];
 }
 
 // Matches IdentityCardType in schema.prisma — keep in sync.
@@ -91,3 +131,4 @@ export interface HealthResponse {
     redis: 'ok' | 'unreachable';
   };
 }
+
