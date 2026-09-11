@@ -73,6 +73,13 @@ export function createParallelApi(http: AxiosInstance) {
         const { data } = await http.get<OnboardingStatusDto>('/v1/onboarding/status');
         return data;
       },
+
+      complete: async (): Promise<ParallelMapResponse> => {
+        const { data } = await http.post<ParallelMapResponse>(
+          '/v1/onboarding/complete',
+        );
+        return data;
+      },
     },
     cards: {
       create: async (dto: CreateIdentityCardDto): Promise<{ jobId: string }> => {

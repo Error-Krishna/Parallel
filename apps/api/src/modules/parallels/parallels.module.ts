@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { IdentityEngineModule } from '../identity-engine/identity-engine.module.js';
-import { OnboardingController } from './onboarding.controller.js';
-import { OnboardingService } from './onboarding.service.js';
+import { ParallelsController } from './parallels.controller.js';
+import { ParallelsService } from './parallels.service.js';
 
 @Module({
   imports: [AuthModule, IdentityEngineModule],
-  controllers: [OnboardingController],
-  providers: [OnboardingService],
+  controllers: [ParallelsController],
+  providers: [ParallelsService],
 })
-export class OnboardingModule {}
+export class ParallelsModule {}

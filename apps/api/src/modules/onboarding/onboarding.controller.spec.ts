@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OnboardingController } from './onboarding.controller.js';
+import { IdentityEngineService } from '../identity-engine/identity-engine.service.js';
 import { OnboardingService } from './onboarding.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 
@@ -19,6 +20,12 @@ describe('OnboardingController', () => {
         {
           provide: OnboardingService,
           useValue: onboardingService,
+        },
+        {
+          provide: IdentityEngineService,
+          useValue: {
+            generateInitialMap: vi.fn(),
+          },
         },
       ],
     })

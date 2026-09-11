@@ -39,16 +39,15 @@ export default function LoginPage() {
     try {
       await login(data);
 
-      // Mirrors USER_FLOW.md Flow 1: send an unonboarded user back into onboarding
-      // at exactly the step after their last answered question, and a fully
-      // onboarded user onward. There's no Parallel Map screen yet (Phase 5/6), so
-      // "onward" is home for now — swap this for `/map` once that screen exists.
+      // Resume incomplete onboarding at the next unanswered step.
+      // Fully onboarded users go directly to their Parallel Map.
       const status = await api.onboarding.getStatus();
 
       if (!status.completed) {
         router.push(`/onboarding/${status.answeredCount + 1}`);
       } else {
-        router.push('/');
+        await api.onboarding.complete();
+        router.push('/map');
       }
     } catch (error: unknown) {
       const message =

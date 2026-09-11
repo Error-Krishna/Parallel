@@ -11,6 +11,8 @@ import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
+import { IdentityEngineModule } from './modules/identity-engine/identity-engine.module.js';
+import { ParallelsModule } from './modules/parallels/parallels.module.js';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
     AuthModule,
     UsersModule,
     OnboardingModule,
+    IdentityEngineModule,
+    ParallelsModule,
     // Feature modules land here as they're built (blueprint §16):
     // IdentityEngineModule, ParallelsModule, QuestsModule, FeedModule,
     // SocialModule, CommunitiesModule, EventsModule, WrappedModule, CardsModule,
