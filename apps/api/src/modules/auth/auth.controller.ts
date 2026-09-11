@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  HttpCode,
+  HttpStatus,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -25,6 +27,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto) {
     const result = await this.authService.login(dto);
     return apiResponse(result, 'Login successful');
