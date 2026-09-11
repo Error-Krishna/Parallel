@@ -59,6 +59,21 @@ export interface ParallelMapResponse {
   parallels: UserParallelDto[];
 }
 
+export type ContentType = 'POST' | 'ARTICLE' | 'EVENT' | 'CHALLENGE_PROMPT';
+
+export interface ContentItemDto {
+  id: string;
+  parallelTypeId: string;
+  type: ContentType;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface ParallelFeedResponse {
+  items: ContentItemDto[];
+  nextCursor: string | null;
+}
+
 export interface OnboardingAnswerDto {
   questionKey: string;
   answerValue: string;

@@ -12,7 +12,10 @@ import type {
   OnboardingAnswerDto,
   OnboardingQuestion,
   OnboardingStatusDto,
+  ContentItemDto,
+  ParallelFeedResponse,
   ParallelMapResponse,
+  PublicUser,
   ParallelTypeDto,
   SignupDto,
   WrappedRecapDto,
@@ -42,15 +45,71 @@ export function createParallelApi(http: AxiosInstance) {
       },
     },
 
+    users: {
+      follow: async (userId: string): Promise<void> => {
+        await http.post(`/v1/users/${userId}/follow`);
+      },
+    },
+
     health: {
       check: async (): Promise<HealthResponse> => {
         const { data } = await http.get<HealthResponse>('/v1/health');
         return data;
       },
     },
+    content: {
+      get: async (contentId: string): Promise<ContentItemDto> => {
+        const { data } = await http.get<ContentItemDto>(
+          `/v1/content/${contentId}`,
+        );
+        return data;
+      },
+
+      interact: async (
+        contentId: string,
+        signalType: string,
+      ): Promise<void> => {
+        await http.post(`/v1/content/${contentId}/interactions`, {
+          signalType,
+        });
+      },
+    },
+
     parallels: {
+      get: async (parallelId: string): Promise<ParallelTypeDto> => {
+        const { data } = await http.get<ParallelTypeDto>(
+          `/v1/parallels/${parallelId}`,
+        );
+        return data;
+      },
+
       getMap: async (): Promise<ParallelMapResponse> => {
         const { data } = await http.get<ParallelMapResponse>('/v1/parallels/map');
+        return data;
+      },
+
+      getPeople: async (parallelId: string): Promise<PublicUser[]> => {
+        const { data } = await http.get<PublicUser[]>(
+          `/v1/parallels/${parallelId}/people`,
+        );
+        return data;
+      },
+
+      getFeed: async (
+        parallelId: string,
+        cursor?: string,
+        limit?: number,
+      ): Promise<ParallelFeedResponse> => {
+        const { data } = await http.get<ParallelFeedResponse>(
+          `/v1/parallels/${parallelId}/feed`,
+          {
+            params: {
+              cursor,
+              limit,
+            },
+          },
+        );
+
         return data;
       },
 

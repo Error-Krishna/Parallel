@@ -87,6 +87,58 @@ export class UsersService {
     }
   }
 
+  async followUser(
+    followerId: string,
+    followeeId: string,
+  ): Promise<void> {
+    if (followerId === followeeId) {
+      throw new ConflictException('You cannot follow yourself');
+    }
+
+    const followee = await this.prisma.user.findUnique({
+      where: { id: followeeId },
+      select: { id: true },
+    });
+
+    if (!followee) {
+      throw new NotFoundException('User not found');
+    }
+
+    const existingFollow = await this.prisma.follow.findUnique({
+      where: {
+        followerId_followeeId: {
+          followerId,
+          followeeId,
+        },
+      },
+      select: {
+        followerId: true,
+      },
+    });
+
+    if (existingFollow) {
+      return;
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.follow.create({
+        data: {
+          followerId,
+          followeeId,
+        },
+      }),
+      this.prisma.interestSignal.create({
+        data: {
+          userId: followerId,
+          signalType: 'FOLLOW',
+          targetType: 'user',
+          targetId: followeeId,
+          weight: 1.0,
+        },
+      }),
+    ]);
+  }
+
   async updateProfile(id: string, dto: UpdateUserDto): Promise<User> {
     const username =
       dto.username !== undefined

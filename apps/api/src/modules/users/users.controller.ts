@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Post,
   Get,
   HttpStatus,
   Param,
@@ -52,6 +53,19 @@ export class UsersController {
     return apiResponse(
       this.usersService.toPublicUser(user),
       'User profile updated successfully',
+    );
+  }
+
+  @Post(':userId/follow')
+  async followUser(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    await this.usersService.followUser(currentUser.id, userId);
+
+    return apiResponse(
+      null,
+      'User followed successfully',
     );
   }
 
