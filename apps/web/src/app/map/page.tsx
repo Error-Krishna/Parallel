@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -29,6 +30,7 @@ function getColor(name: string) {
 }
 
 export default function MapPage() {
+  const router = useRouter();
   const [map, setMap] = useState<ParallelMapResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,6 +149,7 @@ export default function MapPage() {
                 key={parallel.id}
                 parallel={parallel}
                 index={index}
+                onEnter={(parallelId) => router.push(`/parallel/${parallelId}`)}
               />
             ))}
           </div>
@@ -200,9 +203,11 @@ function ParallelIcon({
 function ParallelCard({
   parallel,
   index,
+  onEnter,
 }: {
   parallel: UserParallelDto;
   index: number;
+  onEnter: (parallelId: string) => void;
 }) {
   async function handleEnter() {
     try {
@@ -210,6 +215,7 @@ function ParallelCard({
         parallel.parallelType.id,
       );
       console.log('Entered Parallel:', enteredParallel);
+      onEnter(enteredParallel.id);
     } catch (err) {
       console.error('Could not enter Parallel:', err);
     }
