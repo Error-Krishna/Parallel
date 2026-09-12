@@ -39,14 +39,20 @@ export default function LoginPage() {
     try {
       await login(data);
 
-      // Resume incomplete onboarding at the next unanswered step.
-      // Fully onboarded users go directly to their Parallel Map.
+      // Resume incomplete onboarding at the next unanswered step. Fully onboarded
+      // users go straight to their Parallel Map — /map fetches the existing map
+      // itself (GET /v1/parallels/map), so there's no need to call
+      // api.onboarding.complete() again here. That endpoint runs the Identity
+      // Engine's scoring pass, which is meant to happen once, right after
+      // onboarding finishes (see app/onboarding/reveal/page.tsx) — calling it again
+      // on every login would silently overwrite strengthPct/momentum/suggestionReason
+      // back to their initial values each time, wiping out anything real usage
+      // changes later.
       const status = await api.onboarding.getStatus();
 
       if (!status.completed) {
         router.push(`/onboarding/${status.answeredCount + 1}`);
       } else {
-        await api.onboarding.complete();
         router.push('/map');
       }
     } catch (error: unknown) {

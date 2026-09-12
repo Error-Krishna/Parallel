@@ -6,6 +6,7 @@ import type {
   ContentItemDto,
   ParallelTypeDto,
   PublicUser,
+  QuestDto,
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
 
@@ -15,9 +16,12 @@ export default function ParallelPage() {
   const [parallel, setParallel] = useState<ParallelTypeDto | null>(null);
   const [items, setItems] = useState<ContentItemDto[]>([]);
   const [people, setPeople] = useState<PublicUser[]>([]);
+  const [quests, setQuests] = useState<QuestDto[]>([]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [selectedItem, setSelectedItem] = useState<ContentItemDto | null>(null);
-  const [activeTab, setActiveTab] = useState<'feed' | 'people'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'quests' | 'people'>(
+    'feed',
+  );
   const [error, setError] = useState<string | null>(null);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -112,6 +116,19 @@ export default function ParallelPage() {
         err instanceof Error
           ? err.message
           : 'Could not follow this person.',
+      );
+    }
+  }
+
+  async function loadQuests() {
+    try {
+      const result = await api.parallels.getQuests(params.parallelId);
+      setQuests(result);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load quests in this Parallel.',
       );
     }
   }
@@ -218,6 +235,21 @@ export default function ParallelPage() {
           <button
             type="button"
             onClick={() => {
+              setActiveTab('quests');
+              void loadQuests();
+            }}
+            className={`rounded-full px-4 py-2 text-sm font-medium ${
+              activeTab === 'quests'
+                ? 'bg-foreground text-background'
+                : 'border border-border text-muted-foreground'
+            }`}
+          >
+            Quests
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
               setActiveTab('people');
               void loadPeople();
             }}
@@ -231,7 +263,47 @@ export default function ParallelPage() {
           </button>
         </div>
 
-        {activeTab === 'people' ? (
+        {activeTab === 'quests' ? (
+          <section className="space-y-4">
+            {quests.length === 0 ? (
+              <div className="rounded-2xl border border-border p-8 text-center">
+                <h2 className="text-xl font-semibold">
+                  No quests yet.
+                </h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  New experiments will appear here as this Parallel grows.
+                </p>
+              </div>
+            ) : (
+              quests.map((quest) => (
+                <article
+                  key={quest.id}
+                  className="rounded-2xl border border-border bg-card p-6"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-xl font-semibold">
+                        {quest.title}
+                      </h2>
+                      <p className="mt-2 text-muted-foreground">
+                        {quest.description}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 rounded-full border border-border px-3 py-1 font-mono text-xs">
+                      {quest.progress.status.replace('_', ' ')}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-4 text-sm text-muted-foreground">
+                    <span>{quest.steps.length} steps</span>
+                    <span>Reward: {quest.rewardValue}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </section>
+        ) : activeTab === 'people' ? (
           <section className="space-y-4">
             {people.length === 0 ? (
               <div className="rounded-2xl border border-border p-8 text-center">

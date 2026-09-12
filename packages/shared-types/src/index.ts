@@ -147,3 +147,34 @@ export interface HealthResponse {
   };
 }
 
+
+export type QuestRewardType =
+  | 'BADGE'
+  | 'COSMETIC_FRAME'
+  | 'HIDDEN_PARALLEL_HINT';
+
+export type QuestStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface QuestStepDto {
+  title: string;
+  description: string;
+}
+
+export interface QuestProgressDto {
+  status: QuestStatus;
+  currentStep: number;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface QuestDto {
+  id: string;
+  parallelTypeId: string;
+  title: string;
+  description: string;
+  steps: QuestStepDto[];
+  rewardType: QuestRewardType;
+  rewardValue: string;
+  season: string | null;
+  progress: QuestProgressDto;
+}

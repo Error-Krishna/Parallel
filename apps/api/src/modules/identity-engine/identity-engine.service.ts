@@ -2,7 +2,7 @@ import {
   BadRequestException,
   Injectable,
 } from '@nestjs/common';
-import type { PublicUser, ParallelMapResponse } from '@parallel/shared-types';
+import type { ParallelMapResponse } from '@parallel/shared-types';
 import { PrismaService } from '../../database/prisma.service.js';
 import { UsersService } from '../users/users.service.js';
 
@@ -53,16 +53,26 @@ export class IdentityEngineService {
   ) {}
 
   async generateInitialMap(userId: string): Promise<ParallelMapResponse> {
-    const [user, answers] = await Promise.all([
-      this.usersService.findById(userId),
-      this.prisma.onboardingResponse.findMany({
-        where: { userId },
-        select: {
-          questionKey: true,
-          answerValue: true,
-        },
-      }),
-    ]);
+    const existingParallels = await this.prisma.userParallel.findFirst({ where: { userId } });
+
+    // Idempotency guard: this should only ever run the actual scoring pass once,
+    // right after onboarding finishes. Without this check, any repeat call (a
+    // second reveal-page visit via the back button, a retried request, or any
+    // future call site) would silently overwrite strengthPct/momentum/
+    // suggestionReason back to their initial onboarding-derived values — wiping
+    // out anything real usage changes later. Callers that just need the current
+    // map, not a fresh generation, should call getMap() directly instead.
+    if (existingParallels) {
+      return this.getMap(userId);
+    }
+
+    const answers = await this.prisma.onboardingResponse.findMany({
+      where: { userId },
+      select: {
+        questionKey: true,
+        answerValue: true,
+      },
+    });
 
     if (answers.length < 4) {
       throw new BadRequestException(
@@ -132,12 +142,17 @@ export class IdentityEngineService {
       }),
     );
 
-    return this.getMap(userId, user);
+    return this.getMap(userId);
   }
 
-  async getMap(userId: string, user?: PublicUser): Promise<ParallelMapResponse> {
-    const currentUser =
-      user ?? this.usersService.toPublicUser(await this.usersService.findById(userId));
+  // No optional pre-fetched `user` parameter, deliberately — accepting one here
+  // once let a raw Prisma `User` (passwordHash, email, everything) get passed
+  // straight into a client-facing response instead of a sanitized PublicUser (a
+  // real bug this class was shipped with, found and fixed when it briefly
+  // leaked in generateInitialMap's response). Always fetching and sanitizing
+  // internally makes that class of bug structurally impossible here again.
+  async getMap(userId: string): Promise<ParallelMapResponse> {
+    const user = this.usersService.toPublicUser(await this.usersService.findById(userId));
 
     const parallels = await this.prisma.userParallel.findMany({
       where: {
@@ -154,7 +169,7 @@ export class IdentityEngineService {
     });
 
     return {
-      user: currentUser,
+      user,
       parallels: parallels.map((parallel) => ({
         id: parallel.id,
         parallelType: {

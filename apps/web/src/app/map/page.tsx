@@ -144,14 +144,22 @@ export default function MapPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            {map.parallels.map((parallel, index) => (
-              <ParallelCard
-                key={parallel.id}
-                parallel={parallel}
-                index={index}
-                onEnter={(parallelId) => router.push(`/parallel/${parallelId}`)}
-              />
-            ))}
+            {map.parallels.length === 0 ? (
+              <div className="col-span-full rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground">
+                Nothing here yet — your map should populate right after onboarding.
+                If you just finished onboarding and still see this, something went
+                wrong generating your map.
+              </div>
+            ) : (
+              map.parallels.map((parallel, index) => (
+                <ParallelCard
+                  key={parallel.id}
+                  parallel={parallel}
+                  index={index}
+                  onEnter={(parallelId) => router.push(`/parallel/${parallelId}`)}
+                />
+              ))
+            )}
           </div>
         </section>
 

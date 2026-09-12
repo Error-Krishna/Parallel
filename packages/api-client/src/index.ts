@@ -17,6 +17,7 @@ import type {
   ParallelMapResponse,
   PublicUser,
   ParallelTypeDto,
+  QuestDto,
   SignupDto,
   WrappedRecapDto,
 } from '@parallel/shared-types';
@@ -91,6 +92,13 @@ export function createParallelApi(http: AxiosInstance) {
       getPeople: async (parallelId: string): Promise<PublicUser[]> => {
         const { data } = await http.get<PublicUser[]>(
           `/v1/parallels/${parallelId}/people`,
+        );
+        return data;
+      },
+
+      getQuests: async (parallelId: string): Promise<QuestDto[]> => {
+        const { data } = await http.get<QuestDto[]>(
+          `/v1/parallels/${parallelId}/quests`,
         );
         return data;
       },
