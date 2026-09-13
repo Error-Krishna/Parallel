@@ -10,6 +10,7 @@ describe('IdentityEngineService', () => {
     userParallel: Record<string, ReturnType<typeof vi.fn>>;
     parallelType: Record<string, ReturnType<typeof vi.fn>>;
     onboardingResponse: Record<string, ReturnType<typeof vi.fn>>;
+    parallelEvolutionSnapshot: Record<string, ReturnType<typeof vi.fn>>;
   };
   let usersService: {
     findById: ReturnType<typeof vi.fn>;
@@ -38,6 +39,7 @@ describe('IdentityEngineService', () => {
       userParallel: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
       parallelType: { upsert: vi.fn() },
       onboardingResponse: { findMany: vi.fn() },
+      parallelEvolutionSnapshot: { createMany: vi.fn() },
     };
     usersService = {
       findById: vi.fn().mockResolvedValue(fakeUserRow),
@@ -98,6 +100,9 @@ describe('IdentityEngineService', () => {
   it('does not re-run scoring for a user who already has a Parallel map', async () => {
     prisma.userParallel.findFirst.mockResolvedValue({ id: 'existing' });
     prisma.userParallel.findMany.mockResolvedValue([]);
+    prisma.parallelEvolutionSnapshot.findFirst = vi.fn().mockResolvedValue({
+      id: 'snapshot-existing',
+    });
 
     await service.generateInitialMap('u1');
 
@@ -107,6 +112,44 @@ describe('IdentityEngineService', () => {
     expect(prisma.onboardingResponse.findMany).not.toHaveBeenCalled();
     expect(prisma.parallelType.upsert).not.toHaveBeenCalled();
     expect(prisma.userParallel.upsert).not.toHaveBeenCalled();
+    expect(prisma.parallelEvolutionSnapshot.createMany).not.toHaveBeenCalled();
+  });
+
+  it('creates a missing initial evolution snapshot for an existing Parallel map', async () => {
+    prisma.userParallel.findFirst.mockResolvedValue({ id: 'existing' });
+    prisma.userParallel.findMany
+      .mockResolvedValueOnce([
+        {
+          parallelTypeId: 'builder-id',
+          strengthPct: 42,
+        },
+        {
+          parallelTypeId: 'explorer-id',
+          strengthPct: 28,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    prisma.parallelEvolutionSnapshot.findFirst = vi.fn().mockResolvedValue(null);
+    prisma.parallelEvolutionSnapshot.createMany = vi.fn().mockResolvedValue({
+      count: 2,
+    });
+
+    await service.generateInitialMap('u1');
+
+    expect(prisma.parallelEvolutionSnapshot.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'u1',
+          parallelTypeId: 'builder-id',
+          strengthPct: 42,
+        },
+        {
+          userId: 'u1',
+          parallelTypeId: 'explorer-id',
+          strengthPct: 28,
+        },
+      ],
+    });
   });
 
   it('getMap always sanitizes the user, with no way to pass a raw row through', async () => {
@@ -116,5 +159,75 @@ describe('IdentityEngineService', () => {
 
     expect(result.user).toEqual(fakePublicUser);
     expect(usersService.toPublicUser).toHaveBeenCalledWith(fakeUserRow);
+  });
+
+  it('captures the current strength of each Parallel as an evolution snapshot', async () => {
+    prisma.userParallel.findMany.mockResolvedValue([
+      {
+        parallelTypeId: 'builder-id',
+        strengthPct: 42.5,
+      },
+      {
+        parallelTypeId: 'explorer-id',
+        strengthPct: 27.5,
+      },
+    ]);
+    prisma.parallelEvolutionSnapshot = {
+      createMany: vi.fn().mockResolvedValue({ count: 2 }),
+    };
+
+    await service.captureEvolutionSnapshot('u1');
+
+    expect(prisma.parallelEvolutionSnapshot.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'u1',
+          parallelTypeId: 'builder-id',
+          strengthPct: 42.5,
+        },
+        {
+          userId: 'u1',
+          parallelTypeId: 'explorer-id',
+          strengthPct: 27.5,
+        },
+      ],
+    });
+  });
+
+  it('returns the change between the latest two snapshots for each Parallel', async () => {
+    prisma.parallelEvolutionSnapshot.findMany = vi.fn().mockResolvedValue([
+      {
+        parallelTypeId: 'builder-id',
+        strengthPct: 48,
+        capturedAt: new Date('2026-09-13T02:00:00Z'),
+      },
+      {
+        parallelTypeId: 'builder-id',
+        strengthPct: 42,
+        capturedAt: new Date('2026-09-13T01:00:00Z'),
+      },
+      {
+        parallelTypeId: 'explorer-id',
+        strengthPct: 25,
+        capturedAt: new Date('2026-09-13T02:00:00Z'),
+      },
+    ]);
+
+    const result = await service.getEvolution('u1');
+
+    expect(result).toEqual([
+      {
+        parallelTypeId: 'builder-id',
+        currentStrengthPct: 48,
+        previousStrengthPct: 42,
+        deltaPct: 6,
+      },
+      {
+        parallelTypeId: 'explorer-id',
+        currentStrengthPct: 25,
+        previousStrengthPct: null,
+        deltaPct: null,
+      },
+    ]);
   });
 });

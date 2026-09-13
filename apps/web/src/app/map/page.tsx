@@ -3,35 +3,19 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import {
-  ArrowRight,
-  Compass,
-  Gamepad2,
-  Music2,
-  Plus,
-  Sparkles,
-  Users,
-} from 'lucide-react';
-import type { ParallelMapResponse, UserParallelDto } from '@parallel/shared-types';
+import { ArrowRight, Sparkles, Users } from 'lucide-react';
+import type {
+  ParallelEvolutionDto,
+  ParallelMapResponse,
+  UserParallelDto,
+} from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
-
-const colorMap = {
-  Builder: 'var(--parallel-builder)',
-  'Music Head': 'var(--parallel-music-head)',
-  Gamer: 'var(--parallel-gamer)',
-  Explorer: 'var(--parallel-explorer)',
-} as const;
-
-function getColor(name: string) {
-  return (
-    colorMap[name as keyof typeof colorMap] ??
-    'var(--parallel-urbanist)'
-  );
-}
+import { getParallelColor, ParallelIcon } from '@/features/parallels/parallel-visuals';
 
 export default function MapPage() {
   const router = useRouter();
   const [map, setMap] = useState<ParallelMapResponse | null>(null);
+  const [evolution, setEvolution] = useState<ParallelEvolutionDto[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,10 +23,14 @@ export default function MapPage() {
 
     async function loadMap() {
       try {
-        const result = await api.parallels.getMap();
+        const [result, evolutionResult] = await Promise.all([
+          api.parallels.getMap(),
+          api.parallels.getEvolution(),
+        ]);
 
         if (!cancelled) {
           setMap(result);
+          setEvolution(evolutionResult); 
         }
       } catch (err) {
         if (!cancelled) {
@@ -164,6 +152,95 @@ export default function MapPage() {
         </section>
 
         <section className="py-16">
+          <div className="mb-6">
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              Identity evolution
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              See how your sides are changing.
+            </h3>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {evolution.map((change) => {
+              const parallel = map.parallels.find(
+                (item) => item.parallelType.id === change.parallelTypeId,
+              );
+
+              if (!parallel) {
+                return null;
+              }
+
+              const color = getParallelColor(parallel.parallelType.name);
+
+              return (
+                <motion.article
+                  key={change.parallelTypeId}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl border border-border bg-card p-5"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border"
+                        style={{ color }}
+                      >
+                        <ParallelIcon
+                          iconName={parallel.parallelType.icon ?? ""}
+                          className="h-4 w-4"
+                        />
+                      </div>
+
+                      <div>
+                        <p className="font-medium">
+                          {parallel.parallelType.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Current strength
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="font-mono text-lg font-semibold" style={{ color }}>
+                      {Math.round(change.currentStrengthPct)}%
+                    </span>
+                  </div>
+
+                  <div className="mt-5">
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${change.currentStrengthPct}%` }}
+                        transition={{ duration: 0.8, delay: 0.15 }}
+                        className="h-full rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {change.previousStrengthPct === null
+                        ? 'First snapshot'
+                        : 'Since last snapshot'}
+                    </span>
+
+                    <span className="font-mono">
+                      {change.deltaPct === null
+                        ? '—'
+                        : change.deltaPct === 0
+                          ? 'No change yet'
+                          : `${change.deltaPct > 0 ? '+' : ''}${change.deltaPct.toFixed(1)}%`}
+                    </span>
+                  </div>
+                </motion.article>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="py-16">
           <div className="rounded-2xl border border-dashed border-border p-8 text-center sm:p-12">
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
               The map changes
@@ -183,31 +260,6 @@ export default function MapPage() {
   );
 }
 
-function ParallelIcon({
-  iconName,
-  className,
-}: {
-  iconName: string;
-  className?: string;
-}) {
-  switch (iconName) {
-    case 'compass':
-      return <Compass className={className} />;
-    case 'gamepad':
-      return <Gamepad2 className={className} />;
-    case 'music':
-      return <Music2 className={className} />;
-    case 'plus':
-      return <Plus className={className} />;
-    case 'sparkles':
-      return <Sparkles className={className} />;
-    case 'users':
-      return <Users className={className} />;
-    default:
-      return <Compass className={className} />;
-  }
-}
-
 function ParallelCard({
   parallel,
   index,
@@ -222,13 +274,12 @@ function ParallelCard({
       const enteredParallel = await api.parallels.enter(
         parallel.parallelType.id,
       );
-      console.log('Entered Parallel:', enteredParallel);
       onEnter(enteredParallel.id);
     } catch (err) {
       console.error('Could not enter Parallel:', err);
     }
   }
-  const color = getColor(parallel.parallelType.name);
+  const color = getParallelColor(parallel.parallelType.name);
 
   return (
     <motion.article

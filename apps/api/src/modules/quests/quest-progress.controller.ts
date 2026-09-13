@@ -8,6 +8,15 @@ import { QuestsService } from './quests.service.js';
 export class QuestProgressController {
   constructor(private readonly questsService: QuestsService) {}
 
+  @Post(':questId/complete-step')
+  completeStep(
+    @CurrentUser() user: { id: string },
+    @Param('questId') questId: string,
+  ) {
+    return this.questsService.completeStep(user.id, questId);
+  }
+
+
   @Post(':questId/start')
   startQuest(
     @CurrentUser() user: { id: string },

@@ -94,6 +94,8 @@ Each screen lists: the flow(s) in `USER_FLOW.md` it serves, its states, and its 
 
 **MVP screen set** (build these first, per `FEATURE.md` §16): Landing, Sign Up, Log In, Onboarding (both), Parallel Map, New Parallel Discovered, Enter Parallel Feed, Content detail, Identity Evolution, People Discovery, Profile preview, Profile — My Parallels. Everything else follows the P1–P4 priority order already defined in `FEATURE.md` §17.
 
+**Actual routes built so far deviate from the `(marketing)`/`(app)` route-group plan above** — flat routes were used instead: `/login`, `/signup`, `/onboarding/[step]`, `/onboarding/reveal`, `/map`, and `/parallel/[id]` (singular, not `/parallels/[id]`). `/parallel/[id]` already includes both Feed and People as tabs on one screen (`Feed | People`) rather than People being a separate route — Quests is not yet a tab there (backend exists, no frontend yet, see `API.md` §6). Update the table above to match if the route-group structure is intentionally dropped, or migrate these routes into groups if it's picked back up — don't leave both versions half-true.
+
 ---
 
 ## 4. Identity Card design spec (blueprint §7, §4.4)

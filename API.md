@@ -70,7 +70,7 @@ Username rules (`common/validators/username.validator.ts`'s `@IsUsername()`) are
 
 ---
 
-## 4. Onboarding — ✅ implemented (no Identity Engine scoring yet, see note below)
+## 4. Onboarding — ✅ implemented
 
 | Method | Path                       | Auth | Request                                            | Response                                                                                                                                                                                       |
 | ------ | -------------------------- | ---- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -78,9 +78,13 @@ Username rules (`common/validators/username.validator.ts`'s `@IsUsername()`) are
 | `POST` | `/v1/onboarding/answers`   | 🔒   | `OnboardingAnswerDto { questionKey, answerValue }` | `204 No Content` — upserts one answer (resubmitting the same `questionKey` overwrites, never duplicates); rejects an unknown `questionKey` or an `answerValue` outside that question's options |
 | `GET`  | `/v1/onboarding/status`    | 🔒   | —                                                  | `OnboardingStatusDto { completed, answeredCount, totalQuestions, answers }` — also unwrapped. `apps/web`'s login flow calls this to route a returning user (`app/login/page.tsx`)              |
 
+**Also implemented, not in the original table**: `POST /v1/onboarding/complete` — runs the Identity Engine's initial scoring pass (`IdentityEngineService.generateInitialMap`, see §5). Idempotent — safe to call more than once; a repeat call just returns the existing map rather than re-scoring. Returns `ParallelMapResponse`, also unwrapped. Called once by `app/onboarding/reveal/page.tsx` right after the last question — **not** on every login (see §5's note on why that matters).
+
 ---
 
-## 5. Identity Engine / Parallel Map (Phase 5–6 — `modules/identity-engine`, `modules/parallels`)
+## 5. Identity Engine / Parallel Map — 🔶 partially implemented (`modules/identity-engine`, `modules/parallels`)
+
+**Implemented, verified working**: `GET /v1/parallels/map` (matches spec exactly). `GET /v1/parallels/:id` **differs from the original spec below** — it returns `ParallelTypeDto` (the Parallel type's own info: id/name/description/icon), not `UserParallelDto` (the user's specific relationship to it) as originally written here; update this if that's ever unified. `POST /v1/parallels/:id/enter` also exists (not in the original table at all) — logs a `PARALLEL_ENTER` interest signal, returns the same `ParallelTypeDto`. **Not yet built**: make-public/hide/unhide/dismiss and the evolution endpoint below are all still spec.
 
 | Method   | Path                            | Auth | Request              | Response                                                                                                                                                                                                                                                           |
 | -------- | ------------------------------- | ---- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -96,7 +100,9 @@ Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/
 
 ---
 
-## 6. Quests & Streaks (Phase 6/9 — `modules/quests`)
+## 6. Quests & Streaks — 🔶 partially implemented (`modules/quests`)
+
+**Implemented**: `GET /v1/parallels/:id/quests` (includes each quest's `progress` for the current user, defaulting to `NOT_STARTED` if none exists) and `POST /v1/quests/:id/start`. **Not yet built**: `GET /v1/quests/:id` alone and the step-completion endpoint below — no frontend for Quests exists yet either (natural next slice after this one).
 
 | Method | Path                                       | Auth | Request | Response                                                                              |
 | ------ | ------------------------------------------ | ---- | ------- | ------------------------------------------------------------------------------------- |
@@ -107,7 +113,9 @@ Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/
 
 ---
 
-## 7. Feed & Content (Phase 5/7 — `modules/feed`)
+## 7. Feed & Content — ✅ implemented (as part of `modules/parallels`, not a separate `modules/feed`)
+
+Built as `ParallelsController`/`ContentController` inside `modules/parallels`, not a standalone feed module as originally planned — update if that ever gets split out. `GET /v1/parallels/:id/feed` is genuinely cursor-paginated per §1's convention. In practice the feed is usually empty right now since nothing seeds `ContentItem` rows yet (no content-creation flow exists) — the frontend (`app/parallel/[id]/page.tsx`) shows an explicit empty state for this rather than a blank screen.
 
 | Method | Path                           | Auth | Request                                       | Response                               |
 | ------ | ------------------------------ | ---- | --------------------------------------------- | -------------------------------------- |
@@ -117,7 +125,9 @@ Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/
 
 ---
 
-## 8. Social (Phase 7 — `modules/social`, `modules/communities`)
+## 8. Social — 🔶 partially implemented (`modules/users`, `modules/parallels`)
+
+**Implemented**: `GET /v1/parallels/:id/people` and following. Follow is at `POST /v1/users/:userId/follow` (by ID, not `:username` as originally spec'd below) — idempotent (following someone twice is a no-op, not an error) and rejects self-follow. **No unfollow endpoint exists yet.** **Not yet built**: Twins, Communities, and Collab are all still spec — don't build ahead of the phase that needs them.
 
 | Method   | Path                         | Auth | Request                            | Response                                                  |
 | -------- | ---------------------------- | ---- | ---------------------------------- | --------------------------------------------------------- |

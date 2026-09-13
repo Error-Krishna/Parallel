@@ -13,6 +13,7 @@ import type {
   OnboardingQuestion,
   OnboardingStatusDto,
   ContentItemDto,
+  ParallelEvolutionDto,
   ParallelFeedResponse,
   ParallelMapResponse,
   PublicUser,
@@ -89,6 +90,13 @@ export function createParallelApi(http: AxiosInstance) {
         return data;
       },
 
+      getEvolution: async (): Promise<ParallelEvolutionDto[]> => {
+        const { data } = await http.get<ParallelEvolutionDto[]>(
+          '/v1/parallels/evolution',
+        );
+        return data;
+      },
+
       getPeople: async (parallelId: string): Promise<PublicUser[]> => {
         const { data } = await http.get<PublicUser[]>(
           `/v1/parallels/${parallelId}/people`,
@@ -99,6 +107,19 @@ export function createParallelApi(http: AxiosInstance) {
       getQuests: async (parallelId: string): Promise<QuestDto[]> => {
         const { data } = await http.get<QuestDto[]>(
           `/v1/parallels/${parallelId}/quests`,
+        );
+        return data;
+      },
+
+      startQuest: async (questId: string): Promise<QuestDto['progress']> => {
+        const { data } = await http.post<QuestDto['progress']>(
+          `/v1/quests/${questId}/start`,
+        );
+        return data;
+      },
+      completeStep: async (questId: string): Promise<QuestDto['progress']> => {
+        const { data } = await http.post<QuestDto['progress']>(
+          `/v1/quests/${questId}/complete-step`,
         );
         return data;
       },

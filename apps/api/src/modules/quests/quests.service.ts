@@ -54,6 +54,75 @@ export class QuestsService {
       },
     }));
   }
+  async completeStep(userId: string, questId: string) {
+    const quest = await this.prisma.quest.findUnique({
+      where: { id: questId },
+      select: {
+        id: true,
+        steps: true,
+      },
+    });
+
+    if (!quest) {
+      throw new NotFoundException('Quest not found');
+    }
+
+    const progress = await this.prisma.userQuestProgress.findUnique({
+      where: {
+        userId_questId: {
+          userId,
+          questId,
+        },
+      },
+    });
+
+    if (!progress) {
+      throw new NotFoundException('Quest has not been started');
+    }
+
+    if (progress.status === 'COMPLETED') {
+      return progress;
+    }
+
+    const steps = Array.isArray(quest.steps) ? quest.steps : [];
+    const nextStep = progress.currentStep + 1;
+    const completed = nextStep >= steps.length;
+
+    const updatedProgress = await this.prisma.userQuestProgress.update({
+      where: {
+        userId_questId: {
+          userId,
+          questId,
+        },
+      },
+      data: {
+        currentStep: nextStep,
+        status: completed ? 'COMPLETED' : 'IN_PROGRESS',
+        completedAt: completed ? new Date() : null,
+      },
+      select: {
+        status: true,
+        currentStep: true,
+        startedAt: true,
+        completedAt: true,
+      },
+    });
+
+    if (completed) {
+      await this.prisma.interestSignal.create({
+        data: {
+          userId,
+          signalType: 'CHALLENGE_COMPLETE',
+          targetType: 'QUEST',
+          targetId: questId,
+        },
+      });
+
+    }
+
+    return updatedProgress;
+  }
+
   async startQuest(userId: string, questId: string) {
     const quest = await this.prisma.quest.findUnique({
       where: { id: questId },

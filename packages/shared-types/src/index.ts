@@ -59,6 +59,13 @@ export interface ParallelMapResponse {
   parallels: UserParallelDto[];
 }
 
+export interface ParallelEvolutionDto {
+  parallelTypeId: string;
+  currentStrengthPct: number;
+  previousStrengthPct: number | null;
+  deltaPct: number | null;
+}
+
 export type ContentType = 'POST' | 'ARTICLE' | 'EVENT' | 'CHALLENGE_PROMPT';
 
 export interface ContentItemDto {

@@ -63,6 +63,15 @@ export class IdentityEngineService {
     // out anything real usage changes later. Callers that just need the current
     // map, not a fresh generation, should call getMap() directly instead.
     if (existingParallels) {
+      const existingSnapshot = await this.prisma.parallelEvolutionSnapshot.findFirst({
+        where: { userId },
+        select: { id: true },
+      });
+
+      if (!existingSnapshot) {
+        await this.captureEvolutionSnapshot(userId);
+      }
+
       return this.getMap(userId);
     }
 
@@ -142,6 +151,8 @@ export class IdentityEngineService {
       }),
     );
 
+    await this.captureEvolutionSnapshot(userId);
+
     return this.getMap(userId);
   }
 
@@ -188,6 +199,79 @@ export class IdentityEngineService {
         discoveredAt: parallel.discoveredAt.toISOString(),
       })),
     };
+  }
+
+  async getEvolution(userId: string) {
+    const snapshots = await this.prisma.parallelEvolutionSnapshot.findMany({
+      where: { userId },
+      orderBy: {
+        capturedAt: 'desc',
+      },
+      select: {
+        parallelTypeId: true,
+        strengthPct: true,
+        capturedAt: true,
+      },
+    });
+
+    const grouped = new Map<
+      string,
+      Array<{ strengthPct: number; capturedAt: Date }>
+    >();
+
+    for (const snapshot of snapshots) {
+      const existing = grouped.get(snapshot.parallelTypeId) ?? [];
+      existing.push({
+        strengthPct: snapshot.strengthPct,
+        capturedAt: snapshot.capturedAt,
+      });
+      grouped.set(snapshot.parallelTypeId, existing);
+    }
+
+    return Array.from(grouped.entries()).map(
+      ([parallelTypeId, parallelSnapshots]) => {
+        const current = parallelSnapshots[0];
+        const previous = parallelSnapshots[1];
+
+        return {
+          parallelTypeId,
+          currentStrengthPct: current.strengthPct,
+          previousStrengthPct: previous?.strengthPct ?? null,
+          deltaPct:
+            previous === undefined
+              ? null
+              : Number(
+                  (current.strengthPct - previous.strengthPct).toFixed(1),
+                ),
+        };
+      },
+    );
+  }
+
+  async captureEvolutionSnapshot(userId: string): Promise<void> {
+    const parallels = await this.prisma.userParallel.findMany({
+      where: {
+        userId,
+        isHidden: false,
+        dismissedAt: null,
+      },
+      select: {
+        parallelTypeId: true,
+        strengthPct: true,
+      },
+    });
+
+    if (parallels.length === 0) {
+      return;
+    }
+
+    await this.prisma.parallelEvolutionSnapshot.createMany({
+      data: parallels.map((parallel) => ({
+        userId,
+        parallelTypeId: parallel.parallelTypeId,
+        strengthPct: parallel.strengthPct,
+      })),
+    });
   }
 
   private calculateScores(answers: OnboardingAnswer[]): ScoreMap {
