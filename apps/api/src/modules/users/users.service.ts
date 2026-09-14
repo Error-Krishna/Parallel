@@ -149,6 +149,19 @@ export class UsersService {
     ]);
   }
 
+  async getFollowingIds(userId: string): Promise<string[]> {
+    const follows = await this.prisma.follow.findMany({
+      where: {
+        followerId: userId,
+      },
+      select: {
+        followeeId: true,
+      },
+    });
+
+    return follows.map((follow) => follow.followeeId);
+  }
+
   async unfollowUser(
     followerId: string,
     followeeId: string,

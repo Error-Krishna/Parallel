@@ -121,12 +121,14 @@ export default function ParallelDetailPage() {
     Promise.all([
       api.parallels.getPeople(parallelId),
       api.users.getTwins(),
+      api.users.getFollowing(),
     ])
-      .then(([peopleResult, twinsResult]) => {
+      .then(([peopleResult, twinsResult, followingIds]) => {
         if (cancelled) return;
 
         setPeople(peopleResult);
         setTwinMatches(twinsResult);
+        setFollowedIds(new Set(followingIds));
       })
       .catch(() => {
         if (!cancelled) {

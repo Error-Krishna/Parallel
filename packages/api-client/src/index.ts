@@ -66,6 +66,13 @@ export function createParallelApi(http: AxiosInstance) {
         return data.data;
       },
 
+      getFollowing: async (): Promise<string[]> => {
+        const { data } = await http.get<ApiResponse<string[]>>(
+          '/v1/users/following',
+        );
+        return data.data;
+      },
+
       follow: async (userId: string): Promise<void> => {
         await http.post(`/v1/users/${userId}/follow`);
       },

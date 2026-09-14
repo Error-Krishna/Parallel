@@ -219,19 +219,31 @@ export default function MapPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">
-                      {change.previousStrengthPct === null
-                        ? 'First snapshot'
-                        : 'Since last snapshot'}
-                    </span>
+                  <div className="mt-4 flex items-center justify-between gap-4 text-xs">
+                    {change.previousStrengthPct === null ? (
+                      <span className="text-muted-foreground">
+                        First snapshot
+                      </span>
+                    ) : (
+                      <span className="font-mono text-muted-foreground">
+                        {Math.round(change.previousStrengthPct)}% →{' '}
+                        {Math.round(change.currentStrengthPct)}%
+                      </span>
+                    )}
 
-                    <span className="font-mono">
+                    <span
+                      className={[
+                        'font-mono font-medium',
+                        change.deltaPct !== null && change.deltaPct > 0
+                          ? 'text-foreground'
+                          : 'text-muted-foreground',
+                      ].join(' ')}
+                    >
                       {change.deltaPct === null
                         ? '—'
                         : change.deltaPct === 0
                           ? 'No change yet'
-                          : `${change.deltaPct > 0 ? '+' : ''}${change.deltaPct.toFixed(1)}%`}
+                          : `${change.deltaPct > 0 ? '↑ +' : '↓ '}${Math.abs(change.deltaPct).toFixed(1)}%`}
                     </span>
                   </div>
                 </motion.article>

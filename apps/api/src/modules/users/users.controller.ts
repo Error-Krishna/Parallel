@@ -102,6 +102,18 @@ export class UsersController {
     );
   }
 
+  @Get('following')
+  async getFollowing(@CurrentUser() currentUser: AuthenticatedUser) {
+    const followingIds = await this.usersService.getFollowingIds(
+      currentUser.id,
+    );
+
+    return apiResponse(
+      followingIds,
+      'Following users fetched successfully',
+    );
+  }
+
   @Get(':username')
   async getByUsername(@Param('username') username: string) {
     const user = await this.usersService.findByUsername(username);
