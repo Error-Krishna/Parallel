@@ -9,6 +9,7 @@ import type {
   ParallelTypeDto,
   PublicUser,
   QuestDto,
+  TwinMatchDto,
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
 import { getParallelColor, ParallelIcon } from '@/features/parallels/parallel-visuals';
@@ -56,6 +57,7 @@ export default function ParallelDetailPage() {
   const [people, setPeople] = useState<PublicUser[] | null>(null);
   const [peopleLoading, setPeopleLoading] = useState(false);
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
+  const [twinMatches, setTwinMatches] = useState<TwinMatchDto[]>([]);
 
   // Header + first page of the feed, on mount.
   useEffect(() => {
@@ -115,13 +117,22 @@ export default function ParallelDetailPage() {
     if (tab !== 'people' || people !== null) return;
 
     let cancelled = false;
-    api.parallels
-      .getPeople(parallelId)
-      .then((result) => {
-        if (!cancelled) setPeople(result);
+
+    Promise.all([
+      api.parallels.getPeople(parallelId),
+      api.users.getTwins(),
+    ])
+      .then(([peopleResult, twinsResult]) => {
+        if (cancelled) return;
+
+        setPeople(peopleResult);
+        setTwinMatches(twinsResult);
       })
       .catch(() => {
-        if (!cancelled) setPeople([]);
+        if (!cancelled) {
+          setPeople([]);
+          setTwinMatches([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setPeopleLoading(false);
@@ -195,15 +206,36 @@ export default function ParallelDetailPage() {
   }
 
   async function handleFollow(userId: string) {
-    if (followedIds.has(userId)) return;
+    const followed = followedIds.has(userId);
 
-    setFollowedIds((prev) => new Set(prev).add(userId));
+    setFollowedIds((prev) => {
+      const next = new Set(prev);
+
+      if (followed) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+
+      return next;
+    });
+
     try {
-      await api.users.follow(userId);
+      if (followed) {
+        await api.users.unfollow(userId);
+      } else {
+        await api.users.follow(userId);
+      }
     } catch {
       setFollowedIds((prev) => {
         const next = new Set(prev);
-        next.delete(userId);
+
+        if (followed) {
+          next.add(userId);
+        } else {
+          next.delete(userId);
+        }
+
         return next;
       });
     }
@@ -317,9 +349,11 @@ export default function ParallelDetailPage() {
             />
           ) : (
             <PeopleTab
+              router={router}
               loading={peopleLoading}
               people={people}
               followedIds={followedIds}
+              twinMatches={twinMatches}
               onFollow={(id) => void handleFollow(id)}
             />
           )}
@@ -512,14 +546,18 @@ function QuestsTab({
 }
 
 function PeopleTab({
+  router,
   loading,
   people,
   followedIds,
+  twinMatches,
   onFollow,
 }: {
+  router: ReturnType<typeof useRouter>;
   loading: boolean;
   people: PublicUser[] | null;
   followedIds: Set<string>;
+  twinMatches: TwinMatchDto[];
   onFollow: (id: string) => void;
 }) {
   if (loading || people === null) {
@@ -541,6 +579,7 @@ function PeopleTab({
     <div className="space-y-2">
       {people.map((person) => {
         const followed = followedIds.has(person.id);
+        const twin = twinMatches.find((match) => match.user.id === person.id);
 
         return (
           <div
@@ -552,21 +591,29 @@ function PeopleTab({
               {person.bio && (
                 <p className="mt-0.5 text-sm text-muted-foreground">{person.bio}</p>
               )}
+              {twin && (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/twins/${twin.id}`)}
+                  className="mt-1 font-mono text-xs text-muted-foreground transition hover:text-foreground"
+                >
+                  Parallel Twin · {Math.round(twin.similarityScore)}%
+                </button>
+              )}
             </div>
 
             <button
               type="button"
               onClick={() => onFollow(person.id)}
-              disabled={followed}
               className={[
                 'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
                 followed
-                  ? 'border-border text-muted-foreground'
+                  ? 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
                   : 'border-foreground/20 hover:bg-accent',
               ].join(' ')}
             >
               <UserPlus className="h-4 w-4" />
-              {followed ? 'Following' : 'Follow'}
+              {followed ? 'Unfollow' : 'Follow'}
             </button>
           </div>
         );

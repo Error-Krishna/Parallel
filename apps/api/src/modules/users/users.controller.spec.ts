@@ -14,6 +14,7 @@ describe('UsersController', () => {
     findByUsername: ReturnType<typeof vi.fn>;
     updateProfile: ReturnType<typeof vi.fn>;
     toPublicUser: ReturnType<typeof vi.fn>;
+    getTwinMatches: ReturnType<typeof vi.fn>;
   };
 
   const currentUser = { id: '1', jti: 'test-jti', exp: 9999999999 };
@@ -26,6 +27,7 @@ describe('UsersController', () => {
       findByUsername: vi.fn(),
       updateProfile: vi.fn().mockResolvedValue(fakeUserRow),
       toPublicUser: vi.fn().mockReturnValue(fakePublicUser),
+      getTwinMatches: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -67,6 +69,29 @@ describe('UsersController', () => {
       success: true,
       message: 'User profile updated successfully',
       data: fakePublicUser,
+    });
+  });
+
+  it('getTwins returns the current user Twin matches', async () => {
+    const twins = [
+      {
+        id: 'twin-1',
+        user: fakePublicUser,
+        similarityScore: 90,
+        sharedParallelTypeIds: ['builder'],
+        computedAt: '2026-09-14T10:00:00.000Z',
+      },
+    ];
+
+    usersService.getTwinMatches.mockResolvedValue(twins);
+
+    const result = await controller.getTwins(currentUser);
+
+    expect(usersService.getTwinMatches).toHaveBeenCalledWith('1');
+    expect(result).toEqual({
+      success: true,
+      message: 'Twin matches fetched successfully',
+      data: twins,
     });
   });
 

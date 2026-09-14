@@ -5,7 +5,17 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { User } from '@prisma/client';
-import type { PublicUser } from '@parallel/shared-types';
+import type {
+  PublicUser,
+  TwinMatchDto,
+  UserVisibleParallelDto,
+} from '@parallel/shared-types';
+
+export interface TwinMatch {
+  userId: string;
+  similarityScore: number;
+  sharedParallelTypeIds: string[];
+}
 import { PrismaService } from '../../database/prisma.service.js';
 import type { UpdateUserDto } from './dto/update-user.dto.js';
 
@@ -137,6 +147,243 @@ export class UsersService {
         },
       }),
     ]);
+  }
+
+  async unfollowUser(
+    followerId: string,
+    followeeId: string,
+  ): Promise<void> {
+    if (followerId === followeeId) {
+      throw new ConflictException('You cannot unfollow yourself');
+    }
+
+    const followee = await this.prisma.user.findUnique({
+      where: { id: followeeId },
+      select: { id: true },
+    });
+
+    if (!followee) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.follow.deleteMany({
+      where: {
+        followerId,
+        followeeId,
+      },
+    });
+  }
+
+  async calculateTwinMatch(
+    userAId: string,
+    userBId: string,
+  ): Promise<TwinMatch> {
+    if (userAId === userBId) {
+      throw new ConflictException('You cannot match a user with yourself');
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: [userAId, userBId],
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (users.length !== 2) {
+      throw new NotFoundException('User not found');
+    }
+
+    const userParallels = await this.prisma.userParallel.findMany({
+      where: {
+        userId: {
+          in: [userAId, userBId],
+        },
+        isGhost: false,
+        isHidden: false,
+        dismissedAt: null,
+      },
+      select: {
+        userId: true,
+        parallelTypeId: true,
+        strengthPct: true,
+      },
+    });
+
+    const userAScores = new Map(
+      userParallels
+        .filter((parallel) => parallel.userId === userAId)
+        .map((parallel) => [parallel.parallelTypeId, parallel.strengthPct]),
+    );
+
+    const userBScores = new Map(
+      userParallels
+        .filter((parallel) => parallel.userId === userBId)
+        .map((parallel) => [parallel.parallelTypeId, parallel.strengthPct]),
+    );
+
+    const sharedParallelTypeIds = [...userAScores.keys()].filter((id) =>
+      userBScores.has(id),
+    );
+
+    if (sharedParallelTypeIds.length === 0) {
+      return {
+        userId: userBId,
+        similarityScore: 0,
+        sharedParallelTypeIds: [],
+      };
+    }
+
+    const totalMatch = sharedParallelTypeIds.reduce((sum, parallelTypeId) => {
+      const scoreA = userAScores.get(parallelTypeId)!;
+      const scoreB = userBScores.get(parallelTypeId)!;
+      const difference = Math.abs(scoreA - scoreB);
+
+      return sum + (1 - difference / 100);
+    }, 0);
+
+    const similarityScore =
+      (totalMatch / sharedParallelTypeIds.length) * 100;
+
+    return {
+      userId: userBId,
+      similarityScore: Number(similarityScore.toFixed(2)),
+      sharedParallelTypeIds,
+    };
+  }
+
+  async getTwinMatches(userId: string): Promise<TwinMatchDto[]> {
+    const twins = await this.prisma.twin.findMany({
+      where: {
+        OR: [
+          { userAId: userId },
+          { userBId: userId },
+        ],
+      },
+      orderBy: {
+        similarityScore: 'desc',
+      },
+      include: {
+        userA: true,
+        userB: true,
+      },
+    });
+
+    return twins.map((twin) => {
+      const otherUser =
+        twin.userAId === userId ? twin.userB : twin.userA;
+
+      return {
+        id: twin.id,
+        user: this.toPublicUser(otherUser),
+        similarityScore: twin.similarityScore,
+        sharedParallelTypeIds: twin.sharedParallelTypeIds as string[],
+        computedAt: twin.computedAt.toISOString(),
+      };
+    });
+  }
+
+  async getVisibleParallels(
+    userId: string,
+  ): Promise<UserVisibleParallelDto[]> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const parallels = await this.prisma.userParallel.findMany({
+      where: {
+        userId,
+        isGhost: false,
+        isHidden: false,
+        dismissedAt: null,
+      },
+      orderBy: {
+        strengthPct: 'desc',
+      },
+      select: {
+        id: true,
+        strengthPct: true,
+        parallelType: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            icon: true,
+          },
+        },
+      },
+    });
+
+    return parallels;
+  }
+
+  async getTwinCandidateUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        parallels: {
+          some: {
+            isGhost: false,
+            isHidden: false,
+            dismissedAt: null,
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
+
+    return users.map((user) => user.id);
+  }
+
+  async saveTwinMatch(
+    userAId: string,
+    userBId: string,
+  ): Promise<TwinMatch | null> {
+    const match = await this.calculateTwinMatch(userAId, userBId);
+
+    if (match.similarityScore < 70) {
+      return null;
+    }
+
+    const [userAIdSorted, userBIdSorted] = [userAId, userBId].sort();
+
+    const twin = await this.prisma.twin.upsert({
+      where: {
+        userAId_userBId: {
+          userAId: userAIdSorted,
+          userBId: userBIdSorted,
+        },
+      },
+      create: {
+        userAId: userAIdSorted,
+        userBId: userBIdSorted,
+        sharedParallelTypeIds: match.sharedParallelTypeIds,
+        similarityScore: match.similarityScore,
+      },
+      update: {
+        sharedParallelTypeIds: match.sharedParallelTypeIds,
+        similarityScore: match.similarityScore,
+        computedAt: new Date(),
+      },
+    });
+
+    return {
+      userId: userBId,
+      similarityScore: twin.similarityScore,
+      sharedParallelTypeIds: twin.sharedParallelTypeIds as string[],
+    };
   }
 
   async updateProfile(id: string, dto: UpdateUserDto): Promise<User> {

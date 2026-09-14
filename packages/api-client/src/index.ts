@@ -21,6 +21,8 @@ import type {
   QuestDto,
   SignupDto,
   WrappedRecapDto,
+  TwinMatchDto,
+  UserVisibleParallelDto,
 } from '@parallel/shared-types';
 
 export function createParallelApi(http: AxiosInstance) {
@@ -48,8 +50,28 @@ export function createParallelApi(http: AxiosInstance) {
     },
 
     users: {
+      getUserParallels: async (
+        userId: string,
+      ): Promise<UserVisibleParallelDto[]> => {
+        const { data } = await http.get<ApiResponse<UserVisibleParallelDto[]>>(
+          `/v1/users/${userId}/parallels`,
+        );
+        return data.data;
+      },
+
+      getTwins: async (): Promise<TwinMatchDto[]> => {
+        const { data } = await http.get<ApiResponse<TwinMatchDto[]>>(
+          '/v1/users/twins',
+        );
+        return data.data;
+      },
+
       follow: async (userId: string): Promise<void> => {
         await http.post(`/v1/users/${userId}/follow`);
+      },
+
+      unfollow: async (userId: string): Promise<void> => {
+        await http.post(`/v1/users/${userId}/unfollow`);
       },
     },
 

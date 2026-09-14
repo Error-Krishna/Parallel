@@ -54,6 +54,20 @@ export interface UserParallelDto {
   discoveredAt: string; // ISO date string over the wire
 }
 
+export interface TwinMatchDto {
+  id: string;
+  user: PublicUser;
+  similarityScore: number;
+  sharedParallelTypeIds: string[];
+  computedAt: string;
+}
+
+export interface UserVisibleParallelDto {
+  id: string;
+  parallelType: ParallelTypeDto;
+  strengthPct: number;
+}
+
 export interface ParallelMapResponse {
   user: PublicUser;
   parallels: UserParallelDto[];

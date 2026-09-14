@@ -56,6 +56,26 @@ export class UsersController {
     );
   }
 
+  @Get(':userId/parallels')
+  async getUserParallels(@Param('userId') userId: string) {
+    const parallels = await this.usersService.getVisibleParallels(userId);
+
+    return apiResponse(
+      parallels,
+      'User Parallels fetched successfully',
+    );
+  }
+
+  @Get('twins')
+  async getTwins(@CurrentUser() currentUser: AuthenticatedUser) {
+    const twins = await this.usersService.getTwinMatches(currentUser.id);
+
+    return apiResponse(
+      twins,
+      'Twin matches fetched successfully',
+    );
+  }
+
   @Post(':userId/follow')
   async followUser(
     @CurrentUser() currentUser: AuthenticatedUser,
@@ -66,6 +86,19 @@ export class UsersController {
     return apiResponse(
       null,
       'User followed successfully',
+    );
+  }
+
+  @Post(':userId/unfollow')
+  async unfollowUser(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param('userId') userId: string,
+  ) {
+    await this.usersService.unfollowUser(currentUser.id, userId);
+
+    return apiResponse(
+      null,
+      'User unfollowed successfully',
     );
   }
 

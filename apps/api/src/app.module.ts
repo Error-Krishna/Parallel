@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { QuestsModule } from './modules/quests/quests.module.js';
+import { TwinsModule } from './jobs/twins/twins.module.js';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller.js';
@@ -33,6 +34,7 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
     }),
     DatabaseModule,
     JobsModule,
+    TwinsModule,
     RedisProviderModule,
     HealthModule,
     AuthModule,
@@ -42,9 +44,8 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
     ParallelsModule,
     QuestsModule,
     // Feature modules land here as they're built (blueprint §16):
-    // IdentityEngineModule, ParallelsModule, FeedModule,
-    // SocialModule, CommunitiesModule, EventsModule, WrappedModule, CardsModule,
-    // NotificationsModule, AdminModule.
+    // FeedModule, SocialModule, CommunitiesModule, EventsModule, WrappedModule,
+    // CardsModule, NotificationsModule, AdminModule.
   ],
   controllers: [AppController],
   providers: [AppService],
