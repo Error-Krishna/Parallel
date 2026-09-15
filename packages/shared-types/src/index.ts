@@ -68,9 +68,19 @@ export interface UserVisibleParallelDto {
   strengthPct: number;
 }
 
+export interface PeopleDiscoveryDto {
+  user: PublicUser;
+  parallels: ParallelTypeDto[];
+}
+
 export interface ParallelMapResponse {
   user: PublicUser;
   parallels: UserParallelDto[];
+}
+
+export interface ParallelEvolutionSnapshotDto {
+  strengthPct: number;
+  capturedAt: string;
 }
 
 export interface ParallelEvolutionDto {
@@ -78,6 +88,7 @@ export interface ParallelEvolutionDto {
   currentStrengthPct: number;
   previousStrengthPct: number | null;
   deltaPct: number | null;
+  history: ParallelEvolutionSnapshotDto[];
 }
 
 export type ContentType = 'POST' | 'ARTICLE' | 'EVENT' | 'CHALLENGE_PROMPT';
@@ -186,6 +197,14 @@ export interface QuestProgressDto {
   currentStep: number;
   startedAt: string | null;
   completedAt: string | null;
+}
+
+export interface QuestCompletionDto {
+  progress: QuestProgressDto;
+  reward: {
+    type: QuestRewardType;
+    value: string;
+  } | null;
 }
 
 export interface QuestDto {

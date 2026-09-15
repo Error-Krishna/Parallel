@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { IdentityEngineModule } from '../identity-engine/identity-engine.module.js';
+import { QuestsModule } from '../quests/quests.module.js';
 import { ContentController } from './content.controller.js';
 import { ParallelsController } from './parallels.controller.js';
 import { ParallelsService } from './parallels.service.js';
 
 @Module({
-  imports: [AuthModule, IdentityEngineModule],
+  imports: [AuthModule, IdentityEngineModule, QuestsModule],
   controllers: [ParallelsController, ContentController],
   providers: [ParallelsService],
 })

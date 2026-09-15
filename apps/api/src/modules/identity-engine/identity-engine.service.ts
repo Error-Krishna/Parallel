@@ -243,6 +243,13 @@ export class IdentityEngineService {
               : Number(
                   (current.strengthPct - previous.strengthPct).toFixed(1),
                 ),
+          history: parallelSnapshots
+            .slice()
+            .reverse()
+            .map((snapshot) => ({
+              strengthPct: snapshot.strengthPct,
+              capturedAt: snapshot.capturedAt.toISOString(),
+            })),
         };
       },
     );
@@ -265,6 +272,37 @@ export class IdentityEngineService {
       return;
     }
 
+    const latestSnapshots = await this.prisma.parallelEvolutionSnapshot.findMany({
+      where: { userId },
+      orderBy: {
+        capturedAt: 'desc',
+      },
+      distinct: ['parallelTypeId'],
+      select: {
+        parallelTypeId: true,
+        strengthPct: true,
+      },
+    });
+
+    const latestByParallel = new Map(
+      latestSnapshots.map((snapshot) => [
+        snapshot.parallelTypeId,
+        snapshot.strengthPct,
+      ]),
+    );
+
+    const hasChanged =
+      latestSnapshots.length !== parallels.length ||
+      parallels.some(
+        (parallel) =>
+          latestByParallel.get(parallel.parallelTypeId) !==
+          parallel.strengthPct,
+      );
+
+    if (!hasChanged) {
+      return;
+    }
+
     await this.prisma.parallelEvolutionSnapshot.createMany({
       data: parallels.map((parallel) => ({
         userId,
@@ -272,6 +310,214 @@ export class IdentityEngineService {
         strengthPct: parallel.strengthPct,
       })),
     });
+  }
+
+  async recalculateScores(userId: string): Promise<void> {
+    const answers = await this.prisma.onboardingResponse.findMany({
+      where: { userId },
+      select: {
+        questionKey: true,
+        answerValue: true,
+      },
+    });
+
+    const onboardingScores = this.calculateScores(answers);
+
+    const signals = await this.prisma.interestSignal.findMany({
+      where: {
+        userId,
+        createdAt: {
+          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        },
+      },
+      select: {
+        signalType: true,
+        targetType: true,
+        targetId: true,
+        weight: true,
+      },
+    });
+
+    const contentSignals = signals.filter(
+      (signal) => signal.targetType === 'content',
+    );
+
+    const questSignals = signals.filter(
+      (signal) => signal.targetType === 'QUEST',
+    );
+
+    const [contents, quests, parallels] = await Promise.all([
+      contentSignals.length > 0
+        ? this.prisma.contentItem.findMany({
+            where: {
+              id: {
+                in: contentSignals.map((signal) => signal.targetId),
+              },
+            },
+            select: {
+              id: true,
+              parallelTypeId: true,
+            },
+          })
+        : [],
+      questSignals.length > 0
+        ? this.prisma.quest.findMany({
+            where: {
+              id: {
+                in: questSignals.map((signal) => signal.targetId),
+              },
+            },
+            select: {
+              id: true,
+              parallelTypeId: true,
+            },
+          })
+        : [],
+      this.prisma.userParallel.findMany({
+        where: {
+          userId,
+          isHidden: false,
+          dismissedAt: null,
+        },
+        select: {
+          parallelTypeId: true,
+          parallelType: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const contentMap = new Map(
+      contents.map((content) => [content.id, content.parallelTypeId]),
+    );
+
+    const questMap = new Map(
+      quests.map((quest) => [quest.id, quest.parallelTypeId]),
+    );
+
+    const keyByName: Record<string, keyof ScoreMap> = {
+      Builder: 'builder',
+      'Music Head': 'musicHead',
+      Gamer: 'gamer',
+      Explorer: 'explorer',
+    };
+
+    const parallelIdToKey = new Map(
+      parallels
+        .map((parallel) => [
+          parallel.parallelTypeId,
+          keyByName[parallel.parallelType.name],
+        ])
+        .filter(
+          (entry): entry is [string, keyof ScoreMap] =>
+            Boolean(entry[1]),
+        ),
+    );
+
+    const signalWeights: Record<string, number> = {
+      VIEW: 1,
+      LIKE: 3,
+      SAVE: 4,
+      SEARCH: 2,
+      PARALLEL_ENTER: 2,
+      QUEST_STEP: 3,
+      CHALLENGE_COMPLETE: 5,
+      SHARE: 3,
+      COMMUNITY_JOIN: 4,
+    };
+
+    const behaviorScores: ScoreMap = {
+      builder: 0,
+      musicHead: 0,
+      gamer: 0,
+      explorer: 0,
+    };
+
+    for (const signal of signals) {
+      if (signal.targetType === 'user') {
+        continue;
+      }
+
+      let parallelId: string | undefined;
+
+      if (signal.targetType === 'parallel_type') {
+        parallelId = signal.targetId;
+      } else if (signal.targetType === 'content') {
+        parallelId = contentMap.get(signal.targetId);
+      } else if (signal.targetType === 'QUEST') {
+        parallelId = questMap.get(signal.targetId);
+      }
+
+      const key = parallelId
+        ? parallelIdToKey.get(parallelId)
+        : undefined;
+
+      if (key) {
+        behaviorScores[key] +=
+          (signalWeights[signal.signalType] ?? 0) * signal.weight;
+      }
+    }
+
+    const onboardingTotal = Object.values(onboardingScores).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+
+    const behaviorTotal = Object.values(behaviorScores).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+
+    const ONBOARDING_WEIGHT = 0.8;
+    const BEHAVIOR_WEIGHT = 0.2;
+
+    const finalScores: ScoreMap = {
+      builder: 0,
+      musicHead: 0,
+      gamer: 0,
+      explorer: 0,
+    };
+
+    for (const key of Object.keys(finalScores) as Array<keyof ScoreMap>) {
+      const onboardingPct =
+        (onboardingScores[key] / onboardingTotal) * 100;
+
+      const behaviorPct =
+        behaviorTotal > 0
+          ? (behaviorScores[key] / behaviorTotal) * 100
+          : 0;
+
+      finalScores[key] =
+        onboardingPct * ONBOARDING_WEIGHT +
+        behaviorPct * BEHAVIOR_WEIGHT;
+    }
+
+    await Promise.all(
+      parallels.map((parallel) => {
+        const key = keyByName[parallel.parallelType.name];
+
+        if (!key) {
+          return Promise.resolve();
+        }
+
+        return this.prisma.userParallel.update({
+          where: {
+            userId_parallelTypeId: {
+              userId,
+              parallelTypeId: parallel.parallelTypeId,
+            },
+          },
+          data: {
+            strengthPct: Number(finalScores[key].toFixed(1)),
+          },
+        });
+      }),
+    );
+
+    await this.captureEvolutionSnapshot(userId);
   }
 
   private calculateScores(answers: OnboardingAnswer[]): ScoreMap {

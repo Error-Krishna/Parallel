@@ -338,6 +338,24 @@ export class UsersService {
     return parallels;
   }
 
+  async getEvolutionUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        parallels: {
+          some: {},
+        },
+      },
+      select: {
+        id: true,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
+
+    return users.map((user) => user.id);
+  }
+
   async getTwinCandidateUserIds(): Promise<string[]> {
     const users = await this.prisma.user.findMany({
       where: {
@@ -397,6 +415,24 @@ export class UsersService {
       similarityScore: twin.similarityScore,
       sharedParallelTypeIds: twin.sharedParallelTypeIds as string[],
     };
+  }
+
+  async refreshTwinMatches(userId: string): Promise<void> {
+    const candidateIds = await this.getTwinCandidateUserIds();
+
+    // getTwinCandidateUserIds() returns every user with at least one visible
+    // Parallel — it isn't scoped to "everyone except userId", so this exclusion has
+    // to happen here. Without it, calculateTwinMatch(userId, userId) would hit its
+    // own self-match guard and throw, aborting the whole refresh on that iteration.
+    const others = candidateIds.filter((candidateId) => candidateId !== userId);
+
+    // Sequential, not Promise.all — this is a full table scan of Parallel data per
+    // pair; at MVP scale that's fine, but running them concurrently would multiply
+    // load on the same rows for no real benefit. Revisit if candidate counts grow
+    // large enough for this to matter.
+    for (const candidateId of others) {
+      await this.saveTwinMatch(userId, candidateId);
+    }
   }
 
   async updateProfile(id: string, dto: UpdateUserDto): Promise<User> {

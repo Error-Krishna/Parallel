@@ -383,6 +383,39 @@ describe('UsersService', () => {
     await expect(service.findById('missing')).rejects.toThrow(NotFoundException);
   });
 
+  it('refreshes Twin matches against every candidate except the user themself', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'self' },
+      { id: 'candidate-a' },
+      { id: 'candidate-b' },
+    ]);
+
+    const saveTwinMatchSpy = vi
+      .spyOn(service, 'saveTwinMatch')
+      .mockResolvedValue(null);
+
+    await service.refreshTwinMatches('self');
+
+    // The candidate list includes 'self' (getTwinCandidateUserIds() isn't scoped to
+    // "everyone but this user") — refreshTwinMatches must filter it out itself, or
+    // this would hit calculateTwinMatch's self-match guard and throw.
+    expect(saveTwinMatchSpy).toHaveBeenCalledTimes(2);
+    expect(saveTwinMatchSpy).toHaveBeenCalledWith('self', 'candidate-a');
+    expect(saveTwinMatchSpy).toHaveBeenCalledWith('self', 'candidate-b');
+    expect(saveTwinMatchSpy).not.toHaveBeenCalledWith('self', 'self');
+  });
+
+  it('does nothing when there are no other candidates', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: 'self' }]);
+    const saveTwinMatchSpy = vi
+      .spyOn(service, 'saveTwinMatch')
+      .mockResolvedValue(null);
+
+    await service.refreshTwinMatches('self');
+
+    expect(saveTwinMatchSpy).not.toHaveBeenCalled();
+  });
+
   it('strips passwordHash and email from the public representation', () => {
     const publicUser = service.toPublicUser({
       id: '1',

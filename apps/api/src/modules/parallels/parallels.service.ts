@@ -3,18 +3,21 @@ import { SignalType } from '@prisma/client';
 import type {
   ContentItemDto,
   PublicUser,
+  PeopleDiscoveryDto,
   ParallelFeedResponse,
   ParallelMapResponse,
   ParallelTypeDto,
 } from '@parallel/shared-types';
 import { PrismaService } from '../../database/prisma.service.js';
 import { IdentityEngineService } from '../identity-engine/identity-engine.service.js';
+import { StreakService } from '../quests/streak.service.js';
 
 @Injectable()
 export class ParallelsService {
   constructor(
     private readonly identityEngine: IdentityEngineService,
     private readonly prisma: PrismaService,
+    private readonly streakService: StreakService,
   ) {}
 
   getMap(userId: string): Promise<ParallelMapResponse> {
@@ -46,7 +49,10 @@ export class ParallelsService {
   ): Promise<void> {
     const content = await this.prisma.contentItem.findUnique({
       where: { id: contentId },
-      select: { id: true },
+      select: {
+        id: true,
+        parallelTypeId: true,
+      },
     });
 
     if (!content) {
@@ -62,12 +68,14 @@ export class ParallelsService {
         weight: 1.0,
       },
     });
+
+    await this.streakService.touch(userId, content.parallelTypeId);
   }
 
   async getPeople(
     userId: string,
     parallelId: string,
-  ): Promise<PublicUser[]> {
+  ): Promise<PeopleDiscoveryDto[]> {
     const parallel = await this.prisma.parallelType.findUnique({
       where: { id: parallelId },
       select: { id: true },
@@ -97,12 +105,44 @@ export class ParallelsService {
             username: true,
             avatarUrl: true,
             bio: true,
+            parallels: {
+              where: {
+                parallelTypeId: { not: parallelId },
+                isGhost: false,
+                isHidden: false,
+                dismissedAt: null,
+              },
+              orderBy: {
+                strengthPct: 'desc',
+              },
+              take: 4,
+              select: {
+                parallelType: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    icon: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
 
-    return users.map(({ user }) => user);
+    return users.map(({ user }) => ({
+      user: {
+        id: user.id,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        bio: user.bio,
+      },
+      parallels: user.parallels.map(
+        ({ parallelType }) => parallelType,
+      ),
+    }));
   }
 
   async getContent(contentId: string): Promise<ContentItemDto> {

@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Sparkles, Users } from 'lucide-react';
+import { ArrowRight, Sparkles, UserCircle, Users } from 'lucide-react';
 import type {
   ParallelEvolutionDto,
   ParallelMapResponse,
+  TwinMatchDto,
   UserParallelDto,
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
@@ -16,6 +17,7 @@ export default function MapPage() {
   const router = useRouter();
   const [map, setMap] = useState<ParallelMapResponse | null>(null);
   const [evolution, setEvolution] = useState<ParallelEvolutionDto[]>([]);
+  const [twins, setTwins] = useState<TwinMatchDto[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,14 +25,19 @@ export default function MapPage() {
 
     async function loadMap() {
       try {
-        const [result, evolutionResult] = await Promise.all([
+        const [result, evolutionResult, twinsResult] = await Promise.all([
           api.parallels.getMap(),
           api.parallels.getEvolution(),
+          // GET /v1/users/twins recomputes matches on read (see UsersController) —
+          // fine to call here even though the map page doesn't strictly need it,
+          // since it's what makes the "Discover people" button below meaningful.
+          api.users.getTwins(),
         ]);
 
         if (!cancelled) {
           setMap(result);
-          setEvolution(evolutionResult); 
+          setEvolution(evolutionResult);
+          setTwins(twinsResult);
         }
       } catch (err) {
         if (!cancelled) {
@@ -88,13 +95,36 @@ export default function MapPage() {
             </h1>
           </div>
 
-          <button
-            type="button"
-            className="rounded-full border border-border p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            aria-label="Discover people"
-          >
-            <Users className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push('/profile')}
+              className="rounded-full border border-border p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              aria-label="View profile"
+              title="View profile"
+            >
+              <UserCircle className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (twins[0]) router.push(`/twins/${twins[0].id}`);
+              }}
+            disabled={twins.length === 0}
+            title={
+              twins.length === 0
+                ? "No Twin found yet — keep exploring to find one"
+                : `View your Parallel Twin: @${twins[0].user.username}`
+            }
+            className="rounded-full border border-border p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            aria-label={
+              twins.length === 0 ? 'No Parallel Twin yet' : 'View your Parallel Twin'
+              }
+            >
+              <Users className="h-5 w-5" />
+            </button>
+          </div>
         </header>
 
         <section className="py-16 sm:py-20">
@@ -161,6 +191,79 @@ export default function MapPage() {
             </h3>
           </div>
 
+          {(() => {
+            const biggestEvolution = evolution
+              .filter((change) => change.deltaPct !== null)
+              .reduce<ParallelEvolutionDto | null>(
+                (best, change) =>
+                  !best || change.deltaPct! > best.deltaPct!
+                    ? change
+                    : best,
+                null,
+              );
+
+            const biggestParallel = biggestEvolution
+              ? map.parallels.find(
+                  (item) =>
+                    item.parallelType.id === biggestEvolution.parallelTypeId,
+                )
+              : null;
+
+            const newestParallel = map.parallels.reduce<UserParallelDto | null>(
+              (newest, parallel) =>
+                !newest ||
+                new Date(parallel.discoveredAt).getTime() >
+                  new Date(newest.discoveredAt).getTime()
+                  ? parallel
+                  : newest,
+              null,
+            );
+
+            return (
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                {biggestEvolution &&
+                  biggestEvolution.deltaPct !== null &&
+                  biggestParallel ? (
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                      Biggest evolution
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-semibold">
+                          {biggestParallel.parallelType.name}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Your biggest change between snapshots.
+                        </p>
+                      </div>
+                      <span className="font-mono text-lg font-semibold">
+                        {biggestEvolution.deltaPct > 0 ? '↑ +' : '↓ '}
+                        {Math.abs(biggestEvolution.deltaPct).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {newestParallel ? (
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                      Newest Parallel
+                    </p>
+                    <div className="mt-2">
+                      <p className="font-semibold">
+                        {newestParallel.parallelType.name}
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        The most recently discovered side of you.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
+
           <div className="grid gap-3 sm:grid-cols-2">
             {evolution.map((change) => {
               const parallel = map.parallels.find(
@@ -172,6 +275,14 @@ export default function MapPage() {
               }
 
               const color = getParallelColor(parallel.parallelType.name);
+              const history = change.history ?? [];
+              const minStrength = Math.min(
+                ...history.map((snapshot) => snapshot.strengthPct),
+              );
+              const maxStrength = Math.max(
+                ...history.map((snapshot) => snapshot.strengthPct),
+              );
+              const strengthRange = Math.max(maxStrength - minStrength, 1);
 
               return (
                 <motion.article
@@ -218,6 +329,104 @@ export default function MapPage() {
                       />
                     </div>
                   </div>
+
+                  {(change.history?.length ?? 0) > 1 ? (
+                    <div className="mt-5">
+                      <div className="mb-3 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>
+                          {new Date(
+                            change.history?.[0]?.capturedAt ?? '',
+                          ).toLocaleDateString()}
+                        </span>
+                        <span>
+                          {new Date(
+                            change.history?.[change.history.length - 1]
+                              ?.capturedAt ?? '',
+                          ).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      <div className="relative h-20 w-full">
+                        <svg
+                          viewBox="0 0 100 40"
+                          preserveAspectRatio="none"
+                          className="h-full w-full overflow-visible"
+                        >
+                          <line
+                            x1="0"
+                            y1="36"
+                            x2="100"
+                            y2="36"
+                            stroke="currentColor"
+                            strokeOpacity="0.08"
+                            strokeWidth="0.5"
+                          />
+
+                          <polyline
+                            fill="none"
+                            stroke={color}
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            points={history
+                              .map((snapshot, index, history) => {
+                                const x =
+                                  history.length === 1
+                                    ? 50
+                                    : (index / (history.length - 1)) * 100;
+                                const y =
+                                  34 -
+                                  ((snapshot.strengthPct - minStrength) /
+                                    strengthRange) *
+                                    28;
+
+                                return `${x},${y}`;
+                              })
+                              .join(' ')}
+                          />
+
+                          {history.map((snapshot, index, history) => {
+                            const x =
+                              history.length === 1
+                                ? 50
+                                : (index / (history.length - 1)) * 100;
+                            const y =
+                                  34 -
+                                  ((snapshot.strengthPct - minStrength) /
+                                    strengthRange) *
+                                    28;
+
+                            return (
+                              <g
+                                key={`${snapshot.capturedAt}-${index}`}
+                              >
+                                <circle
+                                  cx={x}
+                                  cy={y}
+                                  r="2.2"
+                                  fill={color}
+                                  stroke="var(--background)"
+                                  strokeWidth="1"
+                                />
+
+                                <text
+                                  x={x}
+                                  y={Math.max(y - 4, 4)}
+                                  textAnchor="middle"
+                                  fill="currentColor"
+                                  className="fill-muted-foreground"
+                                  fontSize="3"
+                                  fontFamily="monospace"
+                                >
+                                  {Math.round(snapshot.strengthPct)}%
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 flex items-center justify-between gap-4 text-xs">
                     {change.previousStrengthPct === null ? (

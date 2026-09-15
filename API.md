@@ -100,9 +100,9 @@ Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/
 
 ---
 
-## 6. Quests & Streaks — 🔶 partially implemented (`modules/quests`)
+## 6. Quests & Streaks — ✅ implemented (`modules/quests`)
 
-**Implemented**: `GET /v1/parallels/:id/quests` (includes each quest's `progress` for the current user, defaulting to `NOT_STARTED` if none exists) and `POST /v1/quests/:id/start`. **Not yet built**: `GET /v1/quests/:id` alone and the step-completion endpoint below — no frontend for Quests exists yet either (natural next slice after this one).
+**Implemented**: `GET /v1/parallels/:id/quests`, `POST /v1/quests/:id/start`, and `POST /v1/quests/:id/complete-step`. The last one **differs from the original spec below**: it advances the current step by one rather than targeting a specific `:stepIndex`, and grants the reward via a real `UserQuestReward` table on completion. Streaks are real too (`StreakService.touch()`, `modules/quests/streak.service.ts`) — a 48-hour window, shared between quest-step completion and content interactions (`ParallelsService.createContentInteraction`), so either one keeps a Parallel's streak alive. **No frontend for Quests exists yet.**
 
 | Method | Path                                       | Auth | Request | Response                                                                              |
 | ------ | ------------------------------------------ | ---- | ------- | ------------------------------------------------------------------------------------- |

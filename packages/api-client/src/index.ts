@@ -18,11 +18,13 @@ import type {
   ParallelMapResponse,
   PublicUser,
   ParallelTypeDto,
+  QuestCompletionDto,
   QuestDto,
   SignupDto,
   WrappedRecapDto,
   TwinMatchDto,
   UserVisibleParallelDto,
+  PeopleDiscoveryDto,
 } from '@parallel/shared-types';
 
 export function createParallelApi(http: AxiosInstance) {
@@ -50,6 +52,36 @@ export function createParallelApi(http: AxiosInstance) {
     },
 
     users: {
+      getMe: async (): Promise<PublicUser> => {
+        const { data } = await http.get<ApiResponse<PublicUser>>(
+          '/v1/users/me',
+        );
+        return data.data;
+      },
+
+      updateMe: async (input: {
+        username?: string;
+        bio?: string;
+        avatarUrl?: string;
+        visibilitySettings?: {
+          profileVisibility?: 'public' | 'friends' | 'private';
+          showActivityStatus?: boolean;
+        };
+      }): Promise<PublicUser> => {
+        const { data } = await http.patch<ApiResponse<PublicUser>>(
+          '/v1/users/me',
+          input,
+        );
+        return data.data;
+      },
+
+      getByUsername: async (username: string): Promise<PublicUser> => {
+        const { data } = await http.get<ApiResponse<PublicUser>>(
+          `/v1/users/${username}`,
+        );
+        return data.data;
+      },
+
       getUserParallels: async (
         userId: string,
       ): Promise<UserVisibleParallelDto[]> => {
@@ -126,8 +158,10 @@ export function createParallelApi(http: AxiosInstance) {
         return data;
       },
 
-      getPeople: async (parallelId: string): Promise<PublicUser[]> => {
-        const { data } = await http.get<PublicUser[]>(
+      getPeople: async (
+        parallelId: string,
+      ): Promise<PeopleDiscoveryDto[]> => {
+        const { data } = await http.get<PeopleDiscoveryDto[]>(
           `/v1/parallels/${parallelId}/people`,
         );
         return data;
@@ -146,8 +180,8 @@ export function createParallelApi(http: AxiosInstance) {
         );
         return data;
       },
-      completeStep: async (questId: string): Promise<QuestDto['progress']> => {
-        const { data } = await http.post<QuestDto['progress']>(
+      completeStep: async (questId: string): Promise<QuestCompletionDto> => {
+        const { data } = await http.post<QuestCompletionDto>(
           `/v1/quests/${questId}/complete-step`,
         );
         return data;

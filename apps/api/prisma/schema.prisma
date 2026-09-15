@@ -19,27 +19,28 @@ datasource db {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  username     String   @unique
-  passwordHash String   @map("password_hash")
-  avatarUrl    String?  @map("avatar_url")
-  bio          String?
-  visibilitySettings Json @default("{}") @map("visibility_settings")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  username           String   @unique
+  passwordHash       String   @map("password_hash")
+  avatarUrl          String?  @map("avatar_url")
+  bio                String?
+  visibilitySettings Json     @default("{}") @map("visibility_settings")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   onboardingResponses OnboardingResponse[]
   interestSignals     InterestSignal[]
   parallels           UserParallel[]
   evolutionSnapshots  ParallelEvolutionSnapshot[]
   questProgress       UserQuestProgress[]
+  questRewards        UserQuestReward[]
   identityCards       IdentityCard[]
   wrappedRecaps       ParallelWrapped[]
   notifications       Notification[]
 
-  followedBy  Follow[] @relation("followee")
-  following   Follow[] @relation("follower")
+  followedBy Follow[] @relation("followee")
+  following  Follow[] @relation("follower")
 
   twinAsA Twin[] @relation("twinUserA")
   twinAsB Twin[] @relation("twinUserB")
@@ -56,12 +57,12 @@ model User {
 }
 
 model OnboardingResponse {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  questionKey  String   @map("question_key")
-  answerValue  String   @map("answer_value")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionKey String   @map("question_key")
+  answerValue String   @map("answer_value")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@unique([userId, questionKey])
   @@index([userId])
@@ -104,50 +105,50 @@ model InterestSignal {
 // ─────────────────────────────────────────────────────────────
 
 model ParallelType {
-  id                 String   @id @default(cuid())
-  name               String   @unique // "Builder", "Music Head", "The Urbanist"...
-  description        String
-  icon               String?
-  isSystemGenerated  Boolean  @default(true) @map("is_system_generated")
-  createdByUserId    String?  @map("created_by_user_id")
-  createdAt          DateTime @default(now()) @map("created_at")
+  id                String   @id @default(cuid())
+  name              String   @unique // "Builder", "Music Head", "The Urbanist"...
+  description       String
+  icon              String?
+  isSystemGenerated Boolean  @default(true) @map("is_system_generated")
+  createdByUserId   String?  @map("created_by_user_id")
+  createdAt         DateTime @default(now()) @map("created_at")
 
-  userParallels       UserParallel[]
-  evolutionSnapshots  ParallelEvolutionSnapshot[]
-  quests              Quest[]
-  contentItems        ContentItem[]
-  events              RealWorldEvent[]
-  collabSessionsAsA   CollabSession[] @relation("collabParallelTypeA")
-  collabSessionsAsB   CollabSession[] @relation("collabParallelTypeB")
-  rouletteMatches     RouletteMatch[]
+  userParallels      UserParallel[]
+  evolutionSnapshots ParallelEvolutionSnapshot[]
+  quests             Quest[]
+  contentItems       ContentItem[]
+  events             RealWorldEvent[]
+  collabSessionsAsA  CollabSession[]             @relation("collabParallelTypeA")
+  collabSessionsAsB  CollabSession[]             @relation("collabParallelTypeB")
+  rouletteMatches    RouletteMatch[]
 
   @@map("parallel_types")
 }
 
 model UserParallel {
-  id                 String   @id @default(cuid())
-  userId             String   @map("user_id")
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parallelTypeId     String   @map("parallel_type_id")
-  parallelType       ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parallelTypeId String       @map("parallel_type_id")
+  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
 
-  strengthPct        Float    @default(0) @map("strength_pct")
-  momentum           Float    @default(0) // signed delta since last recompute
-  streakCount        Int      @default(0) @map("streak_count")
+  strengthPct         Float     @default(0) @map("strength_pct")
+  momentum            Float     @default(0) // signed delta since last recompute
+  streakCount         Int       @default(0) @map("streak_count")
   streakLastTouchedAt DateTime? @map("streak_last_touched_at")
 
-  isGhost            Boolean  @default(true) @map("is_ghost") // privacy default — see blueprint §4.5 / §22
-  isHidden           Boolean  @default(false) @map("is_hidden") // reversible — user can un-hide from Profile > My Parallels
-  dismissedAt        DateTime? @map("dismissed_at") // permanent reject/remove (suggestion-time reject in Flow 3a, or later removal in Flow 14) — soft delete; Identity Engine must not re-suggest this (user, parallelType) pair while set
-  suggestionReason   String?  @map("suggestion_reason") // plain-language "why" — required for explainability (§22)
+  isGhost          Boolean   @default(true) @map("is_ghost") // privacy default — see blueprint §4.5 / §22
+  isHidden         Boolean   @default(false) @map("is_hidden") // reversible — user can un-hide from Profile > My Parallels
+  dismissedAt      DateTime? @map("dismissed_at") // permanent reject/remove (suggestion-time reject in Flow 3a, or later removal in Flow 14) — soft delete; Identity Engine must not re-suggest this (user, parallelType) pair while set
+  suggestionReason String?   @map("suggestion_reason") // plain-language "why" — required for explainability (§22)
 
-  discoveredAt       DateTime @default(now()) @map("discovered_at")
+  discoveredAt DateTime @default(now()) @map("discovered_at")
 
   // pgvector embedding of this user's interest signature within this Parallel.
   // Prisma doesn't yet have a native `vector` scalar in the stable client, so it's
   // represented as Unsupported here — query/index it with raw SQL (see migration notes
   // in apps/api/README.md). Dimension should match the embedding model in use (blueprint §10.3).
-  embedding          Unsupported("vector(1536)")?
+  embedding Unsupported("vector(1536)")?
 
   @@unique([userId, parallelTypeId])
   @@index([userId])
@@ -155,13 +156,13 @@ model UserParallel {
 }
 
 model ParallelEvolutionSnapshot {
-  id             String   @id @default(cuid())
-  userId         String   @map("user_id")
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parallelTypeId String   @map("parallel_type_id")
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parallelTypeId String       @map("parallel_type_id")
   parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
-  strengthPct    Float    @map("strength_pct")
-  capturedAt     DateTime @default(now()) @map("captured_at")
+  strengthPct    Float        @map("strength_pct")
+  capturedAt     DateTime     @default(now()) @map("captured_at")
 
   @@index([userId, capturedAt])
   @@map("parallel_evolution_snapshots")
@@ -178,19 +179,20 @@ enum QuestRewardType {
 }
 
 model Quest {
-  id             String   @id @default(cuid())
-  parallelTypeId String   @map("parallel_type_id")
-  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  id             String          @id @default(cuid())
+  parallelTypeId String          @map("parallel_type_id")
+  parallelType   ParallelType    @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
   title          String
   description    String
-  steps          Json     // ordered array of step definitions
+  steps          Json // ordered array of step definitions
   rewardType     QuestRewardType @map("reward_type")
-  rewardValue    String   @map("reward_value")
+  rewardValue    String          @map("reward_value")
   season         String?
-  isAiGenerated  Boolean  @default(false) @map("is_ai_generated")
-  createdAt      DateTime @default(now()) @map("created_at")
+  isAiGenerated  Boolean         @default(false) @map("is_ai_generated")
+  createdAt      DateTime        @default(now()) @map("created_at")
 
   progress UserQuestProgress[]
+  rewards  UserQuestReward[]
 
   @@index([parallelTypeId])
   @@map("quests")
@@ -202,16 +204,31 @@ enum QuestStatus {
   COMPLETED
 }
 
+model UserQuestReward {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questId     String          @map("quest_id")
+  quest       Quest           @relation(fields: [questId], references: [id], onDelete: Cascade)
+  rewardType  QuestRewardType @map("reward_type")
+  rewardValue String          @map("reward_value")
+  grantedAt   DateTime        @default(now()) @map("granted_at")
+
+  @@unique([userId, questId])
+  @@index([userId])
+  @@map("user_quest_rewards")
+}
+
 model UserQuestProgress {
-  id           String      @id @default(cuid())
-  userId       String      @map("user_id")
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  questId      String      @map("quest_id")
-  quest        Quest       @relation(fields: [questId], references: [id], onDelete: Cascade)
-  status       QuestStatus @default(NOT_STARTED)
-  currentStep  Int         @default(0) @map("current_step")
-  startedAt    DateTime?   @map("started_at")
-  completedAt  DateTime?   @map("completed_at")
+  id          String      @id @default(cuid())
+  userId      String      @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questId     String      @map("quest_id")
+  quest       Quest       @relation(fields: [questId], references: [id], onDelete: Cascade)
+  status      QuestStatus @default(NOT_STARTED)
+  currentStep Int         @default(0) @map("current_step")
+  startedAt   DateTime?   @map("started_at")
+  completedAt DateTime?   @map("completed_at")
 
   @@unique([userId, questId])
   @@map("user_quest_progress")
@@ -229,13 +246,13 @@ enum ContentType {
 }
 
 model ContentItem {
-  id             String      @id @default(cuid())
-  parallelTypeId String      @map("parallel_type_id")
-  parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
+  id             String                       @id @default(cuid())
+  parallelTypeId String                       @map("parallel_type_id")
+  parallelType   ParallelType                 @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
   type           ContentType
   payload        Json
   embedding      Unsupported("vector(1536)")?
-  createdAt      DateTime    @default(now()) @map("created_at")
+  createdAt      DateTime                     @default(now()) @map("created_at")
 
   @@index([parallelTypeId])
   @@map("content_items")
@@ -277,11 +294,11 @@ model Twin {
 }
 
 model Community {
-  id                        String   @id @default(cuid())
-  name                      String
-  description               String
-  originatingParallelTypeIds Json    @map("originating_parallel_type_ids")
-  autoGenerated              Boolean @default(false) @map("auto_generated")
+  id                         String   @id @default(cuid())
+  name                       String
+  description                String
+  originatingParallelTypeIds Json     @map("originating_parallel_type_ids")
+  autoGenerated              Boolean  @default(false) @map("auto_generated")
   createdAt                  DateTime @default(now()) @map("created_at")
 
   members CommunityMember[]
@@ -301,16 +318,16 @@ model CommunityMember {
 }
 
 model RealWorldEvent {
-  id             String   @id @default(cuid())
-  parallelTypeId String   @map("parallel_type_id")
+  id             String       @id @default(cuid())
+  parallelTypeId String       @map("parallel_type_id")
   parallelType   ParallelType @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
   title          String
   // PostGIS point deferred until real-world discovery (blueprint §17) is built —
   // stored as plain lat/lng for now, matches blueprint's "if introduced" framing for PostGIS.
   latitude       Float?
   longitude      Float?
-  startsAt       DateTime @map("starts_at")
-  sourceUrl      String?  @map("source_url")
+  startsAt       DateTime     @map("starts_at")
+  sourceUrl      String?      @map("source_url")
 
   @@index([parallelTypeId])
   @@map("real_world_events")
@@ -324,17 +341,17 @@ enum CollabStatus {
 }
 
 model CollabSession {
-  id               String       @id @default(cuid())
-  userAId          String       @map("user_a_id")
-  userA            User         @relation("collabUserA", fields: [userAId], references: [id], onDelete: Cascade)
-  userBId          String       @map("user_b_id")
-  userB            User         @relation("collabUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  parallelTypeAId  String       @map("parallel_type_a_id")
-  parallelTypeA    ParallelType @relation("collabParallelTypeA", fields: [parallelTypeAId], references: [id], onDelete: Cascade)
-  parallelTypeBId  String       @map("parallel_type_b_id")
-  parallelTypeB    ParallelType @relation("collabParallelTypeB", fields: [parallelTypeBId], references: [id], onDelete: Cascade)
-  status           CollabStatus @default(PENDING)
-  createdAt        DateTime     @default(now()) @map("created_at")
+  id              String       @id @default(cuid())
+  userAId         String       @map("user_a_id")
+  userA           User         @relation("collabUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId         String       @map("user_b_id")
+  userB           User         @relation("collabUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  parallelTypeAId String       @map("parallel_type_a_id")
+  parallelTypeA   ParallelType @relation("collabParallelTypeA", fields: [parallelTypeAId], references: [id], onDelete: Cascade)
+  parallelTypeBId String       @map("parallel_type_b_id")
+  parallelTypeB   ParallelType @relation("collabParallelTypeB", fields: [parallelTypeBId], references: [id], onDelete: Cascade)
+  status          CollabStatus @default(PENDING)
+  createdAt       DateTime     @default(now()) @map("created_at")
 
   @@map("collab_sessions")
 }
@@ -346,17 +363,17 @@ enum RouletteStatus {
 }
 
 model RouletteMatch {
-  id                    String         @id @default(cuid())
-  userAId               String         @map("user_a_id")
-  userA                 User           @relation("rouletteUserA", fields: [userAId], references: [id], onDelete: Cascade)
-  userBId               String?        @map("user_b_id")
-  userB                 User?          @relation("rouletteUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  parallelTypeId        String?        @map("parallel_type_id") // the Parallel the queuing user picked (Flow 13) — the actual match intersection
-  parallelType          ParallelType?  @relation(fields: [parallelTypeId], references: [id], onDelete: SetNull)
-  matchedParallelContext String?       @map("matched_parallel_context") // free-text note on the specific intersection found, if any
-  status                RouletteStatus @default(QUEUED)
-  startedAt             DateTime       @default(now()) @map("started_at")
-  endedAt                DateTime?     @map("ended_at")
+  id                     String         @id @default(cuid())
+  userAId                String         @map("user_a_id")
+  userA                  User           @relation("rouletteUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId                String?        @map("user_b_id")
+  userB                  User?          @relation("rouletteUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  parallelTypeId         String?        @map("parallel_type_id") // the Parallel the queuing user picked (Flow 13) — the actual match intersection
+  parallelType           ParallelType?  @relation(fields: [parallelTypeId], references: [id], onDelete: SetNull)
+  matchedParallelContext String?        @map("matched_parallel_context") // free-text note on the specific intersection found, if any
+  status                 RouletteStatus @default(QUEUED)
+  startedAt              DateTime       @default(now()) @map("started_at")
+  endedAt                DateTime?      @map("ended_at")
 
   @@map("roulette_matches")
 }
@@ -391,30 +408,30 @@ model ParallelWrapped {
   //   weirdestIntersection: { parallelTypeIds[], note }, streakHighlight: { parallelTypeId, streakCount },
   //   twinId: string | null, narrativeCopy: string (Claude-generated, blueprint §10.3) }
   // Kept as Json rather than rigid columns since the highlight set is expected to grow (blueprint §4.3).
-  highlights  Json
+  highlights Json
 
-  createdAt   DateTime      @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId, periodStart])
   @@map("parallel_wrapped")
 }
 
 model IdentityCard {
-  id         String           @id @default(cuid())
-  userId     String           @map("user_id")
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cardType   IdentityCardType @map("card_type")
+  id       String           @id @default(cuid())
+  userId   String           @map("user_id")
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardType IdentityCardType @map("card_type")
 
   // Polymorphic reference back to whatever triggered this card — a UserParallel.id (PARALLEL),
   // Quest.id (QUEST), ParallelWrapped.id (WRAPPED), Twin.id (TWIN), or CollabSession.id (COLLAB).
   // Same loose-reference pattern as InterestSignal.targetType/targetId — kept nullable since a
   // card can theoretically be regenerated/re-rendered without a live source (e.g. after the
   // source row is deleted) without breaking the FK.
-  sourceType String?          @map("source_type")
-  sourceId   String?          @map("source_id")
+  sourceType String? @map("source_type")
+  sourceId   String? @map("source_id")
 
-  imageUrl   String           @map("image_url")
-  createdAt  DateTime         @default(now()) @map("created_at")
+  imageUrl  String   @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId])
   @@index([sourceType, sourceId])
@@ -422,13 +439,13 @@ model IdentityCard {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   type      String
   payload   Json
   readAt    DateTime? @map("read_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([userId, readAt])
   @@map("notifications")

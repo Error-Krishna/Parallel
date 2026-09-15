@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Heart, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, Heart, UserPlus } from 'lucide-react';
 import type {
   ContentItemDto,
   ParallelTypeDto,
-  PublicUser,
+  PeopleDiscoveryDto,
+  QuestCompletionDto,
   QuestDto,
+  QuestRewardType,
   TwinMatchDto,
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
@@ -47,14 +49,21 @@ export default function ParallelDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>('feed');
   const [quests, setQuests] = useState<QuestDto[] | null>(null);
+  const [questReward, setQuestReward] = useState<{
+    questId: string;
+    type: QuestRewardType;
+    value: string;
+  } | null>(null);
 
   const [feedItems, setFeedItems] = useState<ContentItemDto[]>([]);
   const [feedCursor, setFeedCursor] = useState<string | null>(null);
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const viewedIds = useRef<Set<string>>(new Set());
 
-  const [people, setPeople] = useState<PublicUser[] | null>(null);
+  const [people, setPeople] = useState<PeopleDiscoveryDto[] | null>(null);
   const [peopleLoading, setPeopleLoading] = useState(false);
   const [followedIds, setFollowedIds] = useState<Set<string>>(new Set());
   const [twinMatches, setTwinMatches] = useState<TwinMatchDto[]>([]);
@@ -158,6 +167,23 @@ export default function ParallelDetailPage() {
     }
   }
 
+  useEffect(() => {
+    if (feedItems.length === 0) return;
+
+    const unseenItems = feedItems.filter(
+      (item) => !viewedIds.current.has(item.id),
+    );
+
+    if (unseenItems.length === 0) return;
+
+    unseenItems.forEach((item) => {
+      viewedIds.current.add(item.id);
+      void api.content.interact(item.id, 'VIEW').catch(() => {
+        viewedIds.current.delete(item.id);
+      });
+    });
+  }, [feedItems]);
+
   async function handleLike(itemId: string) {
     if (likedIds.has(itemId)) return;
 
@@ -168,6 +194,22 @@ export default function ParallelDetailPage() {
       await api.content.interact(itemId, 'LIKE');
     } catch {
       setLikedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
+    }
+  }
+
+  async function handleSave(itemId: string) {
+    if (savedIds.has(itemId)) return;
+
+    setSavedIds((prev) => new Set(prev).add(itemId));
+
+    try {
+      await api.content.interact(itemId, 'SAVE');
+    } catch {
+      setSavedIds((prev) => {
         const next = new Set(prev);
         next.delete(itemId);
         return next;
@@ -193,15 +235,23 @@ export default function ParallelDetailPage() {
 
   async function handleCompleteQuestStep(questId: string) {
     try {
-      const progress = await api.parallels.completeStep(questId);
+      const result: QuestCompletionDto = await api.parallels.completeStep(questId);
 
       setQuests((prev) =>
         prev?.map((quest) =>
           quest.id === questId
-            ? { ...quest, progress }
+            ? { ...quest, progress: result.progress }
             : quest,
         ) ?? null,
       );
+
+      if (result.reward) {
+        setQuestReward({
+          questId,
+          type: result.reward.type,
+          value: result.reward.value,
+        });
+      }
     } catch {
       // Keep the current quest state if completing the step fails.
     }
@@ -339,13 +389,16 @@ export default function ParallelDetailPage() {
               hasMore={Boolean(feedCursor)}
               loadingMore={feedLoadingMore}
               likedIds={likedIds}
+              savedIds={savedIds}
               onLoadMore={() => void loadMoreFeed()}
               onLike={(id) => void handleLike(id)}
+              onSave={(id) => void handleSave(id)}
               color={color}
             />
           ) : tab === 'quests' ? (
             <QuestsTab
               quests={quests}
+              questReward={questReward}
               onStartQuest={(id) => void handleStartQuest(id)}
               onCompleteStep={(id) => void handleCompleteQuestStep(id)}
             />
@@ -356,6 +409,7 @@ export default function ParallelDetailPage() {
               people={people}
               followedIds={followedIds}
               twinMatches={twinMatches}
+              parallelName={parallel.name}
               onFollow={(id) => void handleFollow(id)}
             />
           )}
@@ -371,8 +425,10 @@ function FeedTab({
   hasMore,
   loadingMore,
   likedIds,
+  savedIds,
   onLoadMore,
   onLike,
+  onSave,
   color,
 }: {
   loading: boolean;
@@ -380,8 +436,10 @@ function FeedTab({
   hasMore: boolean;
   loadingMore: boolean;
   likedIds: Set<string>;
+  savedIds: Set<string>;
   onLoadMore: () => void;
   onLike: (id: string) => void;
+  onSave: (id: string) => void;
   color: string;
 }) {
   if (loading) {
@@ -404,6 +462,7 @@ function FeedTab({
       {items.map((item, index) => {
         const { title, body } = readPayload(item.payload);
         const liked = likedIds.has(item.id);
+        const saved = savedIds.has(item.id);
 
         return (
           <motion.article
@@ -422,18 +481,33 @@ function FeedTab({
             <h3 className="mt-2 text-lg font-semibold">{title}</h3>
             {body && <p className="mt-1 leading-6 text-muted-foreground">{body}</p>}
 
-            <button
-              type="button"
-              onClick={() => onLike(item.id)}
-              disabled={liked}
-              className={[
-                'mt-4 inline-flex items-center gap-1.5 text-sm font-medium transition',
-                liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
-              ].join(' ')}
-            >
-              <Heart className="h-4 w-4" fill={liked ? 'currentColor' : 'none'} />
-              {liked ? 'Liked' : 'Like'}
-            </button>
+            <div className="mt-4 flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => onLike(item.id)}
+                disabled={liked}
+                className={[
+                  'inline-flex items-center gap-1.5 text-sm font-medium transition',
+                  liked ? 'text-pink-500' : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+              >
+                <Heart className="h-4 w-4" fill={liked ? 'currentColor' : 'none'} />
+                {liked ? 'Liked' : 'Like'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSave(item.id)}
+                disabled={saved}
+                className={[
+                  'inline-flex items-center gap-1.5 text-sm font-medium transition',
+                  saved ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+              >
+                <Bookmark className="h-4 w-4" fill={saved ? 'currentColor' : 'none'} />
+                {saved ? 'Saved' : 'Save'}
+              </button>
+            </div>
           </motion.article>
         );
       })}
@@ -455,10 +529,16 @@ function FeedTab({
 
 function QuestsTab({
   quests,
+  questReward,
   onStartQuest,
   onCompleteStep,
 }: {
   quests: QuestDto[] | null;
+  questReward: {
+    questId: string;
+    type: QuestRewardType;
+    value: string;
+  } | null;
   onStartQuest: (id: string) => void;
   onCompleteStep: (id: string) => void;
 }) {
@@ -522,6 +602,22 @@ function QuestsTab({
             Reward: {quest.rewardValue}
           </div>
 
+          {questReward?.questId === quest.id && questReward.type && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mt-4 rounded-xl border border-foreground/20 bg-accent/40 p-4"
+            >
+              <p className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
+                Quest complete
+              </p>
+              <p className="mt-1 text-lg font-semibold">🎉 Reward unlocked</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {questReward.type.replaceAll('_', ' ')} · {questReward.value}
+              </p>
+            </motion.div>
+          )}
+
           {quest.progress.status === 'NOT_STARTED' && (
             <button
               type="button"
@@ -553,13 +649,15 @@ function PeopleTab({
   people,
   followedIds,
   twinMatches,
+  parallelName,
   onFollow,
 }: {
   router: ReturnType<typeof useRouter>;
   loading: boolean;
-  people: PublicUser[] | null;
+  people: PeopleDiscoveryDto[] | null;
   followedIds: Set<string>;
   twinMatches: TwinMatchDto[];
+  parallelName: string;
   onFollow: (id: string) => void;
 }) {
   if (loading || people === null) {
@@ -580,24 +678,56 @@ function PeopleTab({
   return (
     <div className="space-y-2">
       {people.map((person) => {
-        const followed = followedIds.has(person.id);
-        const twin = twinMatches.find((match) => match.user.id === person.id);
+        const followed = followedIds.has(person.user.id);
+        const twin = twinMatches.find(
+          (match) => match.user.id === person.user.id,
+        );
 
         return (
           <div
-            key={person.id}
+            key={person.user.id}
             className="flex items-center justify-between rounded-xl border border-border bg-card p-4"
           >
             <div>
-              <p className="font-medium">@{person.username}</p>
-              {person.bio && (
-                <p className="mt-0.5 text-sm text-muted-foreground">{person.bio}</p>
+              <button
+                type="button"
+                onClick={() => router.push(`/u/${person.user.username}`)}
+                className="font-medium transition hover:underline"
+              >
+                @{person.user.username}
+              </button>
+              {person.user.bio && (
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {person.user.bio}
+                </p>
+              )}
+
+              <p className="mt-2 text-sm text-muted-foreground">
+                You both explore <span className="font-medium text-foreground">{parallelName}</span>
+              </p>
+
+              {person.parallels.length > 0 && (
+                <div className="mt-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                    Also explores
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {person.parallels.map((otherParallel) => (
+                      <span
+                        key={otherParallel.id}
+                        className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                      >
+                        {otherParallel.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
               {twin && (
                 <button
                   type="button"
                   onClick={() => router.push(`/twins/${twin.id}`)}
-                  className="mt-1 font-mono text-xs text-muted-foreground transition hover:text-foreground"
+                  className="mt-2 inline-flex rounded-full border border-border px-2.5 py-1 font-mono text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 >
                   Parallel Twin · {Math.round(twin.similarityScore)}%
                 </button>
@@ -606,7 +736,7 @@ function PeopleTab({
 
             <button
               type="button"
-              onClick={() => onFollow(person.id)}
+              onClick={() => onFollow(person.user.id)}
               className={[
                 'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
                 followed

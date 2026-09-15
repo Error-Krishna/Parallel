@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { QuestsModule } from './modules/quests/quests.module.js';
 import { TwinsModule } from './jobs/twins/twins.module.js';
+import { EvolutionModule } from './jobs/evolution/evolution.module.js';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller.js';
@@ -35,6 +36,7 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
     DatabaseModule,
     JobsModule,
     TwinsModule,
+    EvolutionModule,
     RedisProviderModule,
     HealthModule,
     AuthModule,

@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
+import { StreakService } from './streak.service.js';
 
 @Injectable()
 export class QuestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly streakService: StreakService,
+  ) {}
 
   async getQuests(userId: string, parallelId: string) {
     const parallel = await this.prisma.parallelType.findUnique({
@@ -59,7 +63,10 @@ export class QuestsService {
       where: { id: questId },
       select: {
         id: true,
+        parallelTypeId: true,
         steps: true,
+        rewardType: true,
+        rewardValue: true,
       },
     });
 
@@ -108,6 +115,22 @@ export class QuestsService {
       },
     });
 
+    await this.prisma.interestSignal.create({
+      data: {
+        userId,
+        signalType: 'QUEST_STEP',
+        targetType: 'QUEST',
+        targetId: questId,
+      },
+    });
+
+    await this.streakService.touch(userId, quest.parallelTypeId);
+
+    let reward: {
+      type: typeof quest.rewardType;
+      value: string;
+    } | null = null;
+
     if (completed) {
       await this.prisma.interestSignal.create({
         data: {
@@ -118,9 +141,36 @@ export class QuestsService {
         },
       });
 
+      const grantedReward = await this.prisma.userQuestReward.upsert({
+        where: {
+          userId_questId: {
+            userId,
+            questId,
+          },
+        },
+        update: {},
+        create: {
+          userId,
+          questId,
+          rewardType: quest.rewardType,
+          rewardValue: quest.rewardValue,
+        },
+        select: {
+          rewardType: true,
+          rewardValue: true,
+        },
+      });
+
+      reward = {
+        type: grantedReward.rewardType,
+        value: grantedReward.rewardValue,
+      };
     }
 
-    return updatedProgress;
+    return {
+      progress: updatedProgress,
+      reward,
+    };
   }
 
   async startQuest(userId: string, questId: string) {
