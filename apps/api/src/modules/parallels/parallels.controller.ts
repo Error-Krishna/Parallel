@@ -32,6 +32,7 @@ export class ParallelsController {
 
   @Get(':parallelId/feed')
   getFeed(
+    @CurrentUser() user: { id: string },
     @Param('parallelId') parallelId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
@@ -39,6 +40,7 @@ export class ParallelsController {
     const parsedLimit = limit ? Number(limit) : undefined;
 
     return this.parallelsService.getFeed(
+      user.id,
       parallelId,
       cursor,
       parsedLimit,

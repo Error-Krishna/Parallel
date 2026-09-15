@@ -136,6 +136,15 @@ export function createParallelApi(http: AxiosInstance) {
           signalType,
         });
       },
+
+      removeInteraction: async (
+        contentId: string,
+        signalType: string,
+      ): Promise<void> => {
+        await http.delete(`/v1/content/${contentId}/interactions`, {
+          data: { signalType },
+        });
+      },
     },
 
     parallels: {

@@ -53,6 +53,35 @@ describe('StreakService', () => {
     });
   });
 
+  it('does not increment the streak when touched again on the same day', async () => {
+    const today = new Date('2026-09-15T20:00:00.000Z');
+
+    prisma.userParallel.findUnique.mockResolvedValue({
+      id: 'up1',
+      streakCount: 3,
+      streakLastTouchedAt: new Date('2026-09-15T08:00:00.000Z'),
+    });
+
+    prisma.userParallel.update.mockResolvedValue({
+      streakCount: 3,
+      streakLastTouchedAt: today,
+    });
+
+    await expect(service.touch('u1', 'builder')).resolves.toEqual({
+      streakCount: 3,
+      streakLastTouchedAt: today,
+    });
+
+    expect(prisma.userParallel.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          streakCount: 3,
+          streakLastTouchedAt: expect.any(Date),
+        },
+      }),
+    );
+  });
+
   it('increments the streak when last touched within 48 hours', async () => {
     prisma.userParallel.findUnique.mockResolvedValue({
       id: 'user-parallel-1',

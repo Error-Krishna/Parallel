@@ -171,6 +171,7 @@ export class ParallelsService {
   }
 
   async getFeed(
+    userId: string,
     parallelId: string,
     cursor?: string,
     limit = 10,
@@ -212,6 +213,38 @@ export class ParallelsService {
     const hasMore = items.length > safeLimit;
     const page = hasMore ? items.slice(0, safeLimit) : items;
 
+    const likedSignals = await this.prisma.interestSignal.findMany({
+      where: {
+        userId,
+        signalType: SignalType.LIKE,
+        targetType: 'content',
+        targetId: {
+          in: page.map((item) => item.id),
+        },
+      },
+      select: {
+        targetId: true,
+      },
+    });
+
+    const likedIds = new Set(likedSignals.map((signal) => signal.targetId));
+
+    const savedSignals = await this.prisma.interestSignal.findMany({
+      where: {
+        userId,
+        signalType: SignalType.SAVE,
+        targetType: 'content',
+        targetId: {
+          in: page.map((item) => item.id),
+        },
+      },
+      select: {
+        targetId: true,
+      },
+    });
+
+    const savedIds = new Set(savedSignals.map((signal) => signal.targetId));
+
     return {
       items: page.map((item) => ({
         id: item.id,
@@ -219,9 +252,26 @@ export class ParallelsService {
         type: item.type,
         payload: item.payload,
         createdAt: item.createdAt.toISOString(),
+        liked: likedIds.has(item.id),
+        saved: savedIds.has(item.id),
       })),
       nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
     };
+  }
+
+  async removeContentInteraction(
+    userId: string,
+    contentId: string,
+    signalType: SignalType,
+  ): Promise<void> {
+    await this.prisma.interestSignal.deleteMany({
+      where: {
+        userId,
+        signalType,
+        targetType: 'content',
+        targetId: contentId,
+      },
+    });
   }
 
   async enterParallel(

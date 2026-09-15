@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { ContentInteractionDto } from './dto/content-interaction.dto.js';
@@ -12,6 +12,20 @@ export class ContentController {
   @Get(':contentId')
   getContent(@Param('contentId') contentId: string) {
     return this.parallelsService.getContent(contentId);
+  }
+
+  @Delete(':contentId/interactions')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeInteraction(
+    @CurrentUser() user: { id: string },
+    @Param('contentId') contentId: string,
+    @Body() dto: ContentInteractionDto,
+  ): Promise<void> {
+    await this.parallelsService.removeContentInteraction(
+      user.id,
+      contentId,
+      dto.signalType,
+    );
   }
 
   @Post(':contentId/interactions')

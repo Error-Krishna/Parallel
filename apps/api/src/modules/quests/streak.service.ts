@@ -27,11 +27,29 @@ export class StreakService {
     const now = new Date();
     const lastTouched = parallel.streakLastTouchedAt;
 
-    const withinWindow =
-      lastTouched !== null &&
-      now.getTime() - lastTouched.getTime() <= 48 * 60 * 60 * 1000;
+    let streakCount = 1;
 
-    const streakCount = withinWindow ? parallel.streakCount + 1 : 1;
+    if (lastTouched !== null) {
+      const nowDay = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+      );
+      const lastTouchedDay = Date.UTC(
+        lastTouched.getUTCFullYear(),
+        lastTouched.getUTCMonth(),
+        lastTouched.getUTCDate(),
+      );
+      const dayDifference = Math.floor(
+        (nowDay - lastTouchedDay) / (24 * 60 * 60 * 1000),
+      );
+
+      if (dayDifference === 0) {
+        streakCount = parallel.streakCount;
+      } else if (dayDifference === 1) {
+        streakCount = parallel.streakCount + 1;
+      }
+    }
 
     return this.prisma.userParallel.update({
       where: { id: parallel.id },

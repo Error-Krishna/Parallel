@@ -99,6 +99,8 @@ export interface ContentItemDto {
   type: ContentType;
   payload: unknown;
   createdAt: string;
+  liked?: boolean;
+  saved?: boolean;
 }
 
 export interface ParallelFeedResponse {

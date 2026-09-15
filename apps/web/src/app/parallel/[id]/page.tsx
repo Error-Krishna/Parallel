@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Bookmark, Heart, UserPlus } from 'lucide-react';
 import type {
   ContentItemDto,
+  ParallelMapResponse,
   ParallelTypeDto,
   PeopleDiscoveryDto,
   QuestCompletionDto,
@@ -46,6 +47,7 @@ export default function ParallelDetailPage() {
   const parallelId = params.id;
 
   const [parallel, setParallel] = useState<ParallelTypeDto | null>(null);
+  const [parallelMap, setParallelMap] = useState<ParallelMapResponse | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>('feed');
   const [quests, setQuests] = useState<QuestDto[] | null>(null);
@@ -74,15 +76,31 @@ export default function ParallelDetailPage() {
 
     async function load() {
       try {
-        const [parallelResult, feedResult] = await Promise.all([
+        const [parallelResult, feedResult, mapResult] = await Promise.all([
           api.parallels.get(parallelId),
           api.parallels.getFeed(parallelId),
+          api.parallels.getMap(),
         ]);
 
         if (cancelled) return;
 
         setParallel(parallelResult);
+        setParallelMap(mapResult);
         setFeedItems(feedResult.items);
+        setLikedIds(
+          new Set(
+            feedResult.items
+              .filter((item) => item.liked)
+              .map((item) => item.id),
+          ),
+        );
+        setSavedIds(
+          new Set(
+            feedResult.items
+              .filter((item) => item.saved)
+              .map((item) => item.id),
+          ),
+        );
         setFeedCursor(feedResult.nextCursor);
       } catch {
         if (!cancelled) setNotFound(true);
@@ -185,33 +203,72 @@ export default function ParallelDetailPage() {
   }, [feedItems]);
 
   async function handleLike(itemId: string) {
-    if (likedIds.has(itemId)) return;
+    const isLiked = likedIds.has(itemId);
 
-    // Optimistic — the interaction endpoint has no meaningful failure mode worth
-    // rolling back for (it just logs an InterestSignal), so don't block the UI on it.
-    setLikedIds((prev) => new Set(prev).add(itemId));
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+
+      if (isLiked) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+
+      return next;
+    });
+
     try {
-      await api.content.interact(itemId, 'LIKE');
+      if (isLiked) {
+        await api.content.removeInteraction(itemId, 'LIKE');
+      } else {
+        await api.content.interact(itemId, 'LIKE');
+      }
     } catch {
       setLikedIds((prev) => {
         const next = new Set(prev);
-        next.delete(itemId);
+
+        if (isLiked) {
+          next.add(itemId);
+        } else {
+          next.delete(itemId);
+        }
+
         return next;
       });
     }
   }
 
   async function handleSave(itemId: string) {
-    if (savedIds.has(itemId)) return;
+    const isSaved = savedIds.has(itemId);
 
-    setSavedIds((prev) => new Set(prev).add(itemId));
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+
+      if (isSaved) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+
+      return next;
+    });
 
     try {
-      await api.content.interact(itemId, 'SAVE');
+      if (isSaved) {
+        await api.content.removeInteraction(itemId, 'SAVE');
+      } else {
+        await api.content.interact(itemId, 'SAVE');
+      }
     } catch {
       setSavedIds((prev) => {
         const next = new Set(prev);
-        next.delete(itemId);
+
+        if (isSaved) {
+          next.add(itemId);
+        } else {
+          next.delete(itemId);
+        }
+
         return next;
       });
     }
@@ -326,6 +383,10 @@ export default function ParallelDetailPage() {
   }
 
   const color = getParallelColor(parallel.name);
+  const currentParallel = parallelMap?.parallels.find(
+    (item) => item.parallelType.id === parallelId,
+  );
+  const streakCount = currentParallel?.streakCount ?? 0;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -356,6 +417,12 @@ export default function ParallelDetailPage() {
             <p className="mt-2 max-w-lg leading-7 text-muted-foreground">
               {parallel.description}
             </p>
+
+            {streakCount > 0 && (
+              <p className="mt-3 font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
+                🔥 {streakCount} day streak
+              </p>
+            )}
 
           </div>
         </motion.header>
@@ -486,7 +553,6 @@ function FeedTab({
               <button
                 type="button"
                 onClick={() => onLike(item.id)}
-                disabled={liked}
                 className={[
                   'inline-flex items-center gap-1.5 text-sm font-medium transition',
                   liked ? 'text-pink-500' : 'text-muted-foreground hover:text-foreground',
@@ -499,7 +565,6 @@ function FeedTab({
               <button
                 type="button"
                 onClick={() => onSave(item.id)}
-                disabled={saved}
                 className={[
                   'inline-flex items-center gap-1.5 text-sm font-medium transition',
                   saved ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground',
