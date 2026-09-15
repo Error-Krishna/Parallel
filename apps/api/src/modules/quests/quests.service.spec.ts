@@ -185,10 +185,13 @@ describe('QuestsService', () => {
     await expect(
       service.completeStep('user-1', 'quest-1'),
     ).resolves.toEqual({
-      status: 'IN_PROGRESS',
-      currentStep: 1,
-      startedAt: new Date('2026-09-14T10:00:00.000Z'),
-      completedAt: null,
+      progress: {
+        status: 'IN_PROGRESS',
+        currentStep: 1,
+        startedAt: new Date('2026-09-14T10:00:00.000Z'),
+        completedAt: null,
+      },
+      reward: null,
     });
 
     expect(prisma.interestSignal.create).toHaveBeenCalledWith({
@@ -215,6 +218,8 @@ describe('QuestsService', () => {
         { title: 'Step 2', description: 'Do step 2.' },
         { title: 'Step 3', description: 'Do step 3.' },
       ],
+      rewardType: 'BADGE',
+      rewardValue: 'Builder Badge',
     });
 
     prisma.userQuestProgress.findUnique.mockResolvedValue({
@@ -223,6 +228,11 @@ describe('QuestsService', () => {
     });
 
     const completedAt = new Date('2026-09-14T11:00:00.000Z');
+
+    prisma.userQuestReward.upsert.mockResolvedValue({
+      rewardType: 'BADGE',
+      rewardValue: 'Builder Badge',
+    });
 
     prisma.userQuestProgress.update.mockResolvedValue({
       status: 'COMPLETED',
@@ -234,10 +244,16 @@ describe('QuestsService', () => {
     await expect(
       service.completeStep('user-1', 'quest-1'),
     ).resolves.toEqual({
-      status: 'COMPLETED',
-      currentStep: 3,
-      startedAt: new Date('2026-09-14T10:00:00.000Z'),
-      completedAt,
+      progress: {
+        status: 'COMPLETED',
+        currentStep: 3,
+        startedAt: new Date('2026-09-14T10:00:00.000Z'),
+        completedAt,
+      },
+      reward: {
+        type: 'BADGE',
+        value: 'Builder Badge',
+      },
     });
 
     expect(prisma.interestSignal.create).toHaveBeenNthCalledWith(1, {

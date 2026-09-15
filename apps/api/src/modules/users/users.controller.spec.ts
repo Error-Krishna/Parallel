@@ -15,6 +15,7 @@ describe('UsersController', () => {
     updateProfile: ReturnType<typeof vi.fn>;
     toPublicUser: ReturnType<typeof vi.fn>;
     getTwinMatches: ReturnType<typeof vi.fn>;
+    refreshTwinMatches: ReturnType<typeof vi.fn>;
   };
 
   const currentUser = { id: '1', jti: 'test-jti', exp: 9999999999 };
@@ -28,6 +29,7 @@ describe('UsersController', () => {
       updateProfile: vi.fn().mockResolvedValue(fakeUserRow),
       toPublicUser: vi.fn().mockReturnValue(fakePublicUser),
       getTwinMatches: vi.fn(),
+      refreshTwinMatches: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({

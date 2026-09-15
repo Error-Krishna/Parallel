@@ -39,7 +39,7 @@ describe('IdentityEngineService', () => {
       userParallel: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
       parallelType: { upsert: vi.fn() },
       onboardingResponse: { findMany: vi.fn() },
-      parallelEvolutionSnapshot: { createMany: vi.fn() },
+      parallelEvolutionSnapshot: { createMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
     };
     usersService = {
       findById: vi.fn().mockResolvedValue(fakeUserRow),
@@ -174,6 +174,7 @@ describe('IdentityEngineService', () => {
     ]);
     prisma.parallelEvolutionSnapshot = {
       createMany: vi.fn().mockResolvedValue({ count: 2 }),
+      findMany: vi.fn().mockResolvedValue([]),
     };
 
     await service.captureEvolutionSnapshot('u1');
@@ -221,12 +222,28 @@ describe('IdentityEngineService', () => {
         currentStrengthPct: 48,
         previousStrengthPct: 42,
         deltaPct: 6,
+        history: [
+          {
+            strengthPct: 42,
+            capturedAt: '2026-09-13T01:00:00.000Z',
+          },
+          {
+            strengthPct: 48,
+            capturedAt: '2026-09-13T02:00:00.000Z',
+          },
+        ],
       },
       {
         parallelTypeId: 'explorer-id',
         currentStrengthPct: 25,
         previousStrengthPct: null,
         deltaPct: null,
+        history: [
+          {
+            strengthPct: 25,
+            capturedAt: '2026-09-13T02:00:00.000Z',
+          },
+        ],
       },
     ]);
   });

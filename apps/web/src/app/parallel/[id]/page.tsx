@@ -356,6 +356,7 @@ export default function ParallelDetailPage() {
             <p className="mt-2 max-w-lg leading-7 text-muted-foreground">
               {parallel.description}
             </p>
+
           </div>
         </motion.header>
 
