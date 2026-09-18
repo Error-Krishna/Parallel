@@ -148,7 +148,7 @@ model UserParallel {
   // Prisma doesn't yet have a native `vector` scalar in the stable client, so it's
   // represented as Unsupported here — query/index it with raw SQL (see migration notes
   // in apps/api/README.md). Dimension should match the embedding model in use (blueprint §10.3).
-  embedding Unsupported("vector(1536)")?
+  embedding Unsupported("vector(384)")?
 
   @@unique([userId, parallelTypeId])
   @@index([userId])
@@ -251,7 +251,7 @@ model ContentItem {
   parallelType   ParallelType                 @relation(fields: [parallelTypeId], references: [id], onDelete: Cascade)
   type           ContentType
   payload        Json
-  embedding      Unsupported("vector(1536)")?
+  embedding      Unsupported("vector(384)")?
   createdAt      DateTime                     @default(now()) @map("created_at")
 
   @@index([parallelTypeId])
