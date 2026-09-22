@@ -13,6 +13,8 @@ describe('EmbeddingProcessor', () => {
       Array.from({ length: 384 }, () => 0.1),
     ),
     saveUserParallelEmbedding: vi.fn().mockResolvedValue(undefined),
+    buildContentSignature: vi.fn().mockReturnValue('content signature'),
+    saveContentEmbedding: vi.fn().mockResolvedValue(undefined),
   };
 
   const prisma = {
@@ -32,6 +34,18 @@ describe('EmbeddingProcessor', () => {
         {
           signalType: 'LIKE',
           weight: 1,
+        },
+      ]),
+    },
+    contentItem: {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          id: 'content1',
+          type: 'POST',
+          payload: {
+            title: 'Build something small',
+            body: 'Start with one tiny idea.',
+          },
         },
       ]),
     },
@@ -82,5 +96,27 @@ describe('EmbeddingProcessor', () => {
       'up1',
       expect.arrayContaining([0.1]),
     );
+
+    expect(
+      embeddingService.buildContentSignature,
+    ).toHaveBeenCalledWith(
+      'POST',
+      {
+        title: 'Build something small',
+        body: 'Start with one tiny idea.',
+      },
+    );
+
+    expect(embeddingService.generate).toHaveBeenCalledWith(
+      'content signature',
+    );
+
+    expect(
+      embeddingService.saveContentEmbedding,
+    ).toHaveBeenCalledWith(
+      'content1',
+      expect.arrayContaining([0.1]),
+    );
   });
 });
+

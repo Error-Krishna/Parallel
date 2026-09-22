@@ -51,6 +51,12 @@ describe('IdentityEngineService', () => {
         IdentityEngineService,
         { provide: PrismaService, useValue: prisma },
         { provide: UsersService, useValue: usersService },
+        {
+          provide: 'BullQueue_embedding',
+          useValue: {
+            add: vi.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

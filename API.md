@@ -104,12 +104,13 @@ Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/
 
 **Implemented**: `GET /v1/parallels/:id/quests`, `POST /v1/quests/:id/start`, and `POST /v1/quests/:id/complete-step`. The last one **differs from the original spec below**: it advances the current step by one rather than targeting a specific `:stepIndex`, and grants the reward via a real `UserQuestReward` table on completion. Streaks are real too (`StreakService.touch()`, `modules/quests/streak.service.ts`) — a 48-hour window, shared between quest-step completion and content interactions (`ParallelsService.createContentInteraction`), so either one keeps a Parallel's streak alive. **No frontend for Quests exists yet.**
 
-| Method | Path                                       | Auth | Request | Response                                                                              |
-| ------ | ------------------------------------------ | ---- | ------- | ------------------------------------------------------------------------------------- |
-| `GET`  | `/v1/parallels/:id/quests`                 | 🔒   | —       | quests scoped to this Parallel type                                                   |
-| `GET`  | `/v1/quests/:id`                           | 🔒   | —       | quest detail + current user's progress if any                                         |
-| `POST` | `/v1/quests/:id/start`                     | 🔒   | —       | creates `UserQuestProgress` row, `status: IN_PROGRESS`                                |
-| `POST` | `/v1/quests/:id/steps/:stepIndex/complete` | 🔒   | —       | advances `currentStep`; if final step, sets `status: COMPLETED` and grants the reward |
+| Method | Path                           | Auth | Request | Response                                                                                                               |
+| ------ | ------------------------------ | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/parallels/:id/quests`     | 🔒   | —       | quests scoped to this Parallel type, each with the current user's `progress`                                           |
+| `POST` | `/v1/quests/:id/start`         | 🔒   | —       | creates `UserQuestProgress` row, `status: IN_PROGRESS` — idempotent if already started                                 |
+| `POST` | `/v1/quests/:id/complete-step` | 🔒   | —       | advances `currentStep` by one; on the final step, sets `status: COMPLETED` and grants the reward via `UserQuestReward` |
+
+**Not yet built**: a standalone `GET /v1/quests/:id`.
 
 ---
 
@@ -125,20 +126,22 @@ Built as `ParallelsController`/`ContentController` inside `modules/parallels`, n
 
 ---
 
-## 8. Social — 🔶 partially implemented (`modules/users`, `modules/parallels`)
+## 8. Social — ✅ implemented (`modules/users`, `modules/parallels`)
 
-**Implemented**: `GET /v1/parallels/:id/people` and following. Follow is at `POST /v1/users/:userId/follow` (by ID, not `:username` as originally spec'd below) — idempotent (following someone twice is a no-op, not an error) and rejects self-follow. **No unfollow endpoint exists yet.** **Not yet built**: Twins, Communities, and Collab are all still spec — don't build ahead of the phase that needs them.
+**Implemented**: `GET /v1/parallels/:id/people`, follow/unfollow, and Twin matching. Follow/unfollow are at `POST /v1/users/:userId/follow` / `POST /v1/users/:userId/unfollow` (by ID and both `POST`, not `DELETE` as originally spec'd below) — both idempotent and reject self-follow/self-unfollow. `GET /v1/users/twins` **recomputes on every read** (`UsersService.refreshTwinMatches`, called from `UsersController.getTwins`) rather than via a scheduled job — no BullMQ job is wired up anywhere in this codebase yet, so this keeps the feature self-contained; revisit with a real background job once candidate counts make an O(n) scan per request too slow. Matching is a weighted-strength similarity across each pair's _visible_ (`isGhost: false, isHidden: false, dismissedAt: null`) shared Parallels, persisted above a 70% threshold with the `userAId < userBId` canonical ordering the schema comment requires (`DATABASE.md` §2.6). **Not yet built**: Communities and Collab are both still spec.
 
-| Method   | Path                         | Auth | Request                            | Response                                                  |
-| -------- | ---------------------------- | ---- | ---------------------------------- | --------------------------------------------------------- |
-| `POST`   | `/v1/users/:username/follow` | 🔒   | —                                  | `204`                                                     |
-| `DELETE` | `/v1/users/:username/follow` | 🔒   | —                                  | `204` (unfollow)                                          |
-| `GET`    | `/v1/parallels/:id/people`   | 🔒   | —                                  | suggested people, scoped to this Parallel's intersections |
-| `GET`    | `/v1/twins`                  | 🔒   | —                                  | current user's computed Twin matches                      |
-| `GET`    | `/v1/communities`            | 🔒   | `?parallelTypeId=`                 | communities related to a Parallel type                    |
-| `POST`   | `/v1/communities/:id/join`   | 🔒   | —                                  | `204`                                                     |
-| `POST`   | `/v1/collab/invite`          | 🔒   | `{ toUsername, myParallelTypeId }` | `CollabSession` (`PENDING`)                               |
-| `POST`   | `/v1/collab/:id/accept`      | 🔒   | `{ myParallelTypeId }`             | `CollabSession` (`ACTIVE`)                                |
+| Method | Path                          | Auth | Request                            | Response                                                          |
+| ------ | ----------------------------- | ---- | ---------------------------------- | ----------------------------------------------------------------- |
+| `POST` | `/v1/users/:userId/follow`    | 🔒   | —                                  | `204` — idempotent, rejects self-follow                           |
+| `POST` | `/v1/users/:userId/unfollow`  | 🔒   | —                                  | `204` — idempotent, rejects self-unfollow                         |
+| `GET`  | `/v1/users/following`         | 🔒   | —                                  | current user's list of followee IDs                               |
+| `GET`  | `/v1/users/:userId/parallels` | 🔒   | —                                  | that user's _visible_ Parallels only (`UserVisibleParallelDto[]`) |
+| `GET`  | `/v1/parallels/:id/people`    | 🔒   | —                                  | suggested people, scoped to this Parallel's intersections         |
+| `GET`  | `/v1/users/twins`             | 🔒   | —                                  | current user's computed Twin matches, recomputed on every call    |
+| `GET`  | `/v1/communities`             | 🔒   | `?parallelTypeId=`                 | communities related to a Parallel type — **spec only**            |
+| `POST` | `/v1/communities/:id/join`    | 🔒   | —                                  | `204` — **spec only**                                             |
+| `POST` | `/v1/collab/invite`           | 🔒   | `{ toUsername, myParallelTypeId }` | `CollabSession` (`PENDING`) — **spec only**                       |
+| `POST` | `/v1/collab/:id/accept`       | 🔒   | `{ myParallelTypeId }`             | `CollabSession` (`ACTIVE`) — **spec only**                        |
 
 ---
 

@@ -61,6 +61,23 @@ export class EmbeddingService {
     return Array.from(output.data);
   }
 
+  buildContentSignature(
+    type: string,
+    payload: unknown,
+  ): string {
+    let payloadText = '';
+
+    if (typeof payload === 'object' && payload !== null) {
+      payloadText = Object.entries(payload as Record<string, unknown>)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join('. ');
+    } else {
+      payloadText = String(payload);
+    }
+
+    return `Content type: ${type}. ${payloadText}`;
+  }
+
   async saveUserParallelEmbedding(
     userParallelId: string,
     embedding: number[],
@@ -71,6 +88,19 @@ export class EmbeddingService {
       UPDATE user_parallels
       SET embedding = ${vector}::vector(384)
       WHERE id = ${userParallelId}
+    `;
+  }
+
+  async saveContentEmbedding(
+    contentItemId: string,
+    embedding: number[],
+  ): Promise<void> {
+    const vector = `[${embedding.join(',')}]`;
+
+    await this.prisma.$executeRaw`
+      UPDATE content_items
+      SET embedding = ${vector}::vector(384)
+      WHERE id = ${contentItemId}
     `;
   }
 }

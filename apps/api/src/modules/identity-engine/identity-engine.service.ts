@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import type { ParallelMapResponse } from '@parallel/shared-types';
 import { PrismaService } from '../../database/prisma.service.js';
 import { UsersService } from '../users/users.service.js';
@@ -50,6 +52,7 @@ export class IdentityEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
+    @InjectQueue('embedding') private readonly embeddingQueue: Queue,
   ) {}
 
   async generateInitialMap(userId: string): Promise<ParallelMapResponse> {
@@ -518,6 +521,10 @@ export class IdentityEngineService {
     );
 
     await this.captureEvolutionSnapshot(userId);
+
+    await this.embeddingQueue.add('generate-user-embeddings', {
+      userId,
+    });
   }
 
   private calculateScores(answers: OnboardingAnswer[]): ScoreMap {

@@ -65,8 +65,30 @@ export class EmbeddingProcessor extends WorkerHost {
       );
     }
 
+    const contentItems = await this.prisma.contentItem.findMany({
+      select: {
+        id: true,
+        type: true,
+        payload: true,
+      },
+    });
+
+    for (const contentItem of contentItems) {
+      const signature = this.embeddingService.buildContentSignature(
+        contentItem.type,
+        contentItem.payload,
+      );
+
+      const embedding = await this.embeddingService.generate(signature);
+
+      await this.embeddingService.saveContentEmbedding(
+        contentItem.id,
+        embedding,
+      );
+    }
+
     this.logger.log(
-      `Generated embeddings for ${parallels.length} Parallels for user ${userId}`,
+      `Generated embeddings for ${parallels.length} Parallels and ${contentItems.length} content items for user ${userId}`,
     );
   }
 }
