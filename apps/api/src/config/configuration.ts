@@ -15,7 +15,13 @@ export interface AppConfig {
     audience: string;
   };
   anthropicApiKey?: string;
+  groqApiKey?: string;
   embeddingApiKey?: string;
+  emergingParallel: {
+    minimumClusterSize: number;
+    minimumCoherence: number;
+    maximumExistingSimilarity: number;
+  };
   bcryptSaltRounds: number;
 }
 
@@ -33,7 +39,20 @@ export default (): { app: AppConfig } => ({
       audience: process.env.JWT_AUDIENCE ?? 'parallel-app',
     },
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    groqApiKey: process.env.GROQ_API_KEY,
     embeddingApiKey: process.env.EMBEDDING_API_KEY,
+    emergingParallel: {
+      minimumClusterSize: parseInt(
+        process.env.EMERGING_PARALLEL_MIN_CLUSTER_SIZE ?? '3',
+        10,
+      ),
+      minimumCoherence: parseFloat(
+        process.env.EMERGING_PARALLEL_MIN_COHERENCE ?? '0.70',
+      ),
+      maximumExistingSimilarity: parseFloat(
+        process.env.EMERGING_PARALLEL_MAX_EXISTING_SIMILARITY ?? '0.20',
+      ),
+    },
     // 12 is the production default (current standard baseline for 2026 hardware).
     // Override to something lower (e.g. 4) only in test/CI env — never lower the
     // in-source default just to make a slow test suite feel faster.
