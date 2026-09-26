@@ -413,10 +413,22 @@ export default function ParallelDetailPage() {
           </div>
 
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">{parallel.name}</h1>
+            {currentParallel?.isGhost && (
+              <span className="inline-flex rounded-full border border-border px-2.5 py-1 text-[10px] font-medium tracking-wider text-muted-foreground">
+                NEW DISCOVERY
+              </span>
+            )}
+
+            <h1 className="mt-3 text-3xl font-bold tracking-tight">{parallel.name}</h1>
             <p className="mt-2 max-w-lg leading-7 text-muted-foreground">
               {parallel.description}
             </p>
+
+            {currentParallel?.isGhost && currentParallel.suggestionReason && (
+              <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+                {currentParallel.suggestionReason}
+              </p>
+            )}
 
             {streakCount > 0 && (
               <p className="mt-3 font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
