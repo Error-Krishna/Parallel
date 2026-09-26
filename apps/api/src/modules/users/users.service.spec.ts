@@ -270,6 +270,32 @@ describe('UsersService', () => {
     });
   });
 
+  it('finds users with Interest Signals as Emerging Parallel candidates', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-a' },
+      { id: 'user-b' },
+    ]);
+
+    await expect(service.getEmergingParallelUserIds()).resolves.toEqual([
+      'user-a',
+      'user-b',
+    ]);
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: {
+        interestSignals: {
+          some: {},
+        },
+      },
+      select: {
+        id: true,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
+  });
+
   it('finds users with visible Parallels as Twin candidates', async () => {
     prisma.user.findMany.mockResolvedValue([
       { id: 'user-a' },

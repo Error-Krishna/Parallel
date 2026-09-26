@@ -15,10 +15,15 @@ describe('EmergingParallelService', () => {
       generateParallelIdentity: vi.fn(),
     };
 
+    const embeddingService = {
+      saveUserParallelEmbedding: vi.fn(),
+    };
+
     const service = new EmergingParallelService(
       prisma as never,
       configService as never,
       namingProvider as never,
+      embeddingService as never,
     );
 
     const result = service.evaluateNovelty(
@@ -199,10 +204,15 @@ describe('EmergingParallelService', () => {
       generateParallelIdentity: vi.fn(),
     };
 
+    const embeddingService = {
+      saveUserParallelEmbedding: vi.fn(),
+    };
+
     const service = new EmergingParallelService(
       prisma as never,
       configService as never,
       namingProvider as never,
+      embeddingService as never,
     );
 
     const result =
@@ -216,6 +226,7 @@ describe('EmergingParallelService', () => {
           strengthPct: 18,
           suggestionReason:
             'Your recent activity forms a strong cluster around architecture and urban exploration.',
+          embedding: [0.1, 0.2, 0.3],
         },
       );
 
@@ -249,6 +260,13 @@ describe('EmergingParallelService', () => {
           'Your recent activity forms a strong cluster around architecture and urban exploration.',
       },
     });
+
+    expect(
+      embeddingService.saveUserParallelEmbedding,
+    ).toHaveBeenCalledWith(
+      'user-parallel-1',
+      [0.1, 0.2, 0.3],
+    );
   });
 
   it('generates an identity for an emerging candidate', async () => {
@@ -300,6 +318,41 @@ describe('EmergingParallelService', () => {
     expect(
       namingProvider.generateParallelIdentity,
     ).toHaveBeenCalledWith(clusterSummary);
+  });
+
+  it('builds an explainable suggestion reason from cluster activity', () => {
+    const service = new EmergingParallelService(
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reason = service['buildSuggestionReason']({
+      items: [
+        {
+          title: 'Street Photography Basics',
+          type: 'POST',
+          description: 'Learn street photography.',
+          signalWeight: 3,
+        },
+        {
+          title: 'Finding Interesting Architecture',
+          type: 'ARTICLE',
+          description: 'Explore unusual architecture.',
+          signalWeight: 4,
+        },
+        {
+          title: 'Architecture Walk',
+          type: 'POST',
+          description: 'Walk through the city.',
+          signalWeight: 4,
+        },
+      ],
+    });
+
+    expect(reason).toBe(
+      'Suggested because your recent activity repeatedly connects with Finding Interesting Architecture, Architecture Walk, Street Photography Basics.',
+    );
   });
 
   it('prepares identities only for novel emerging candidates', async () => {
@@ -386,6 +439,10 @@ describe('EmergingParallelService', () => {
       description:
         'A recurring interest in architecture and city exploration.',
     });
+
+    expect(result[0].suggestionReason).toBe(
+      'Suggested because you showed strong interest in Architecture Walk.',
+    );
 
     expect(
       namingProvider.generateParallelIdentity,

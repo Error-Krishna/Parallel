@@ -220,6 +220,10 @@ export function createParallelApi(http: AxiosInstance) {
         );
         return data;
       },
+
+      hide: async (parallelId: string): Promise<void> => {
+        await http.patch(`/v1/parallels/${parallelId}/hide`);
+      },
     },
     onboarding: {
       getQuestions: async (): Promise<OnboardingQuestion[]> => {

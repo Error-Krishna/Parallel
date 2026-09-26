@@ -7,6 +7,7 @@ import type { Queue } from 'bullmq';
 import type { ParallelMapResponse } from '@parallel/shared-types';
 import { PrismaService } from '../../database/prisma.service.js';
 import { UsersService } from '../users/users.service.js';
+import { EmergingParallelService } from './emerging-parallel.service.js';
 
 interface OnboardingAnswer {
   questionKey: string;
@@ -52,6 +53,7 @@ export class IdentityEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
+    private readonly emergingParallelService: EmergingParallelService,
     @InjectQueue('embedding') private readonly embeddingQueue: Queue,
   ) {}
 

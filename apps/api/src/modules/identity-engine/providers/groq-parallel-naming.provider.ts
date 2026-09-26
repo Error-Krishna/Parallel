@@ -70,7 +70,8 @@ export class GroqParallelNamingProvider
         name: parsed.name.trim(),
         description: parsed.description.trim(),
       };
-    } catch {
+    } catch (error) {
+      console.error('Groq naming provider error:', error);
       return this.fallbackIdentity(clusterSummary);
     }
   }

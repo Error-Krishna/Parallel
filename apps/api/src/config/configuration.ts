@@ -21,6 +21,7 @@ export interface AppConfig {
     minimumClusterSize: number;
     minimumCoherence: number;
     maximumExistingSimilarity: number;
+    clusterSimilarityThreshold: number;
   };
   bcryptSaltRounds: number;
 }
@@ -51,6 +52,9 @@ export default (): { app: AppConfig } => ({
       ),
       maximumExistingSimilarity: parseFloat(
         process.env.EMERGING_PARALLEL_MAX_EXISTING_SIMILARITY ?? '0.20',
+      ),
+      clusterSimilarityThreshold: parseFloat(
+        process.env.EMERGING_PARALLEL_CLUSTER_SIMILARITY_THRESHOLD ?? '0.70',
       ),
     },
     // 12 is the production default (current standard baseline for 2026 hardware).

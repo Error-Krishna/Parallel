@@ -356,6 +356,24 @@ export class UsersService {
     return users.map((user) => user.id);
   }
 
+  async getEmergingParallelUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        interestSignals: {
+          some: {},
+        },
+      },
+      select: {
+        id: true,
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
+
+    return users.map((user) => user.id);
+  }
+
   async getTwinCandidateUserIds(): Promise<string[]> {
     const users = await this.prisma.user.findMany({
       where: {

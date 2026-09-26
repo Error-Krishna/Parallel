@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.js';
+import { EmbeddingService } from './embedding.service.js';
 import type {
   ClusterSummary,
   ParallelNamingProvider,
@@ -17,6 +18,7 @@ export class EmergingParallelService {
     private readonly configService: ConfigService,
     @Inject('ParallelNamingProvider')
     private readonly namingProvider: ParallelNamingProvider,
+    private readonly embeddingService: EmbeddingService,
   ) {}
 
   private getNoveltyRules(): {
@@ -38,6 +40,14 @@ export class EmergingParallelService {
           'app.emergingParallel.maximumExistingSimilarity',
         ) ?? 0.2,
     };
+  }
+
+  getClusterSimilarityThreshold(): number {
+    return (
+      this.configService.get<number>(
+        'app.emergingParallel.clusterSimilarityThreshold',
+      ) ?? 0.7
+    );
   }
 
   evaluateNovelty(
@@ -89,6 +99,7 @@ export class EmergingParallelService {
         name: string;
         description: string;
       };
+      suggestionReason: string;
     }>
   > {
     const candidates =
@@ -113,10 +124,33 @@ export class EmergingParallelService {
       prepared.push({
         ...candidate,
         identity,
+        suggestionReason:
+          this.buildSuggestionReason(
+            candidate.clusterSummary,
+          ),
       });
     }
 
     return prepared;
+  }
+
+  private buildSuggestionReason(
+    clusterSummary: ClusterSummary,
+  ): string {
+    const titles = clusterSummary.items
+      .sort((a, b) => b.signalWeight - a.signalWeight)
+      .slice(0, 3)
+      .map((item) => item.title);
+
+    if (titles.length === 0) {
+      return 'Suggested from a newly detected interest pattern.';
+    }
+
+    if (titles.length === 1) {
+      return `Suggested because you showed strong interest in ${titles[0]}.`;
+    }
+
+    return `Suggested because your recent activity repeatedly connects with ${titles.join(', ')}.`;
   }
 
   async createEmergingParallel(
@@ -127,19 +161,43 @@ export class EmergingParallelService {
       icon?: string;
       strengthPct: number;
       suggestionReason: string;
+      embedding: number[];
     },
   ): Promise<{
     parallelTypeId: string;
     userParallelId: string;
   }> {
-    const parallelType = await this.prisma.parallelType.create({
-      data: {
+    const parallelType = await this.prisma.parallelType.upsert({
+      where: {
+        name: input.name,
+      },
+      update: {
+        description: input.description,
+        icon: input.icon,
+      },
+      create: {
         name: input.name,
         description: input.description,
         icon: input.icon,
         isSystemGenerated: true,
       },
     });
+
+    const existingUserParallel = await this.prisma.userParallel.findUnique({
+      where: {
+        userId_parallelTypeId: {
+          userId,
+          parallelTypeId: parallelType.id,
+        },
+      },
+    });
+
+    if (existingUserParallel) {
+      return {
+        parallelTypeId: parallelType.id,
+        userParallelId: existingUserParallel.id,
+      };
+    }
 
     const userParallel = await this.prisma.userParallel.create({
       data: {
@@ -151,6 +209,11 @@ export class EmergingParallelService {
         suggestionReason: input.suggestionReason,
       },
     });
+
+    await this.embeddingService.saveUserParallelEmbedding(
+      userParallel.id,
+      input.embedding,
+    );
 
     return {
       parallelTypeId: parallelType.id,

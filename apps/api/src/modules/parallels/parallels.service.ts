@@ -72,6 +72,36 @@ export class ParallelsService {
     await this.streakService.touch(userId, content.parallelTypeId);
   }
 
+  async hideParallel(
+    userId: string,
+    parallelId: string,
+  ): Promise<void> {
+    const parallel = await this.prisma.userParallel.findFirst({
+      where: {
+        id: parallelId,
+        userId,
+        isHidden: false,
+        dismissedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!parallel) {
+      throw new NotFoundException('Parallel not found');
+    }
+
+    await this.prisma.userParallel.update({
+      where: {
+        id: parallel.id,
+      },
+      data: {
+        isHidden: true,
+      },
+    });
+  }
+
   async getPeople(
     userId: string,
     parallelId: string,

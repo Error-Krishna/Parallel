@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { ParallelsService } from './parallels.service.js';
@@ -58,5 +58,13 @@ export class ParallelsController {
     @Param('parallelId') parallelId: string,
   ) {
     return this.parallelsService.enterParallel(user.id, parallelId);
+  }
+
+  @Patch(':parallelId/hide')
+  hideParallel(
+    @CurrentUser() user: { id: string },
+    @Param('parallelId') parallelId: string,
+  ) {
+    return this.parallelsService.hideParallel(user.id, parallelId);
   }
 }

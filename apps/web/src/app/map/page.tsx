@@ -175,6 +175,18 @@ export default function MapPage() {
                   parallel={parallel}
                   index={index}
                   onEnter={(parallelId) => router.push(`/parallel/${parallelId}`)}
+                  onHide={(parallelId) => {
+                    setMap((current) =>
+                      current
+                        ? {
+                            ...current,
+                            parallels: current.parallels.filter(
+                              (item) => item.id !== parallelId,
+                            ),
+                          }
+                        : current,
+                    );
+                  }}
                 />
               ))
             )}
@@ -485,10 +497,12 @@ function ParallelCard({
   parallel,
   index,
   onEnter,
+  onHide,
 }: {
   parallel: UserParallelDto;
   index: number;
   onEnter: (parallelId: string) => void;
+  onHide: (parallelId: string) => void;
 }) {
   async function handleEnter() {
     try {
@@ -498,6 +512,15 @@ function ParallelCard({
       onEnter(enteredParallel.id);
     } catch (err) {
       console.error('Could not enter Parallel:', err);
+    }
+  }
+
+  async function handleHide() {
+    try {
+      await api.parallels.hide(parallel.id);
+      onHide(parallel.id);
+    } catch (err) {
+      console.error('Could not hide Parallel:', err);
     }
   }
   const color = getParallelColor(parallel.parallelType.name);
@@ -516,11 +539,19 @@ function ParallelCard({
 
       <div className="relative">
         <div className="flex items-start justify-between gap-4">
-          <div
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-border"
-            style={{ color }}
-          >
-            <ParallelIcon iconName={parallel.parallelType.icon ?? ""} className="h-5 w-5" />
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-border"
+              style={{ color }}
+            >
+              <ParallelIcon iconName={parallel.parallelType.icon ?? ""} className="h-5 w-5" />
+            </div>
+
+            {parallel.isGhost && (
+              <span className="rounded-full border border-border px-2.5 py-1 text-[10px] font-medium tracking-wider text-muted-foreground">
+                NEW DISCOVERY
+              </span>
+            )}
           </div>
 
           <span className="font-mono text-2xl font-semibold" style={{ color }}>
@@ -540,14 +571,26 @@ function ParallelCard({
           {parallel.suggestionReason ?? 'A direction worth exploring.'}
         </p>
 
-        <button
-          type="button"
-          onClick={() => void handleEnter()}
-          className="mt-8 inline-flex items-center gap-2 text-sm font-medium transition group-hover:gap-3"
-        >
-          Enter Parallel
-          <ArrowRight className="h-4 w-4" />
-        </button>
+        <div className="mt-8 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => void handleEnter()}
+            className="inline-flex items-center gap-2 text-sm font-medium transition group-hover:gap-3"
+          >
+            Enter Parallel
+            <ArrowRight className="h-4 w-4" />
+          </button>
+
+          {parallel.isGhost && (
+            <button
+              type="button"
+              onClick={() => void handleHide()}
+              className="text-sm text-muted-foreground transition hover:text-foreground"
+            >
+              Hide
+            </button>
+          )}
+        </div>
       </div>
     </motion.article>
   );
