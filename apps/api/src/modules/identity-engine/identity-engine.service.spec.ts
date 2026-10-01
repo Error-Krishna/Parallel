@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { IdentityEngineService } from './identity-engine.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { UsersService } from '../users/users.service.js';
+import { EmergingParallelService } from './emerging-parallel.service.js';
 
 describe('IdentityEngineService', () => {
   let service: IdentityEngineService;
@@ -51,6 +52,10 @@ describe('IdentityEngineService', () => {
         IdentityEngineService,
         { provide: PrismaService, useValue: prisma },
         { provide: UsersService, useValue: usersService },
+        {
+          provide: EmergingParallelService,
+          useValue: {},
+        },
         {
           provide: 'BullQueue_embedding',
           useValue: {

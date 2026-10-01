@@ -54,12 +54,19 @@ describe('StreakService', () => {
   });
 
   it('does not increment the streak when touched again on the same day', async () => {
-    const today = new Date('2026-09-15T20:00:00.000Z');
+    const today = new Date();
+    const earlierToday = new Date(today);
+    earlierToday.setUTCHours(
+      Math.max(0, today.getUTCHours() - 2),
+      today.getUTCMinutes(),
+      today.getUTCSeconds(),
+      today.getUTCMilliseconds(),
+    );
 
     prisma.userParallel.findUnique.mockResolvedValue({
       id: 'up1',
       streakCount: 3,
-      streakLastTouchedAt: new Date('2026-09-15T08:00:00.000Z'),
+      streakLastTouchedAt: earlierToday,
     });
 
     prisma.userParallel.update.mockResolvedValue({
