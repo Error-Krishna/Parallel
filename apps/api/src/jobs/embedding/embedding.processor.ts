@@ -65,13 +65,13 @@ export class EmbeddingProcessor extends WorkerHost {
       );
     }
 
-    const contentItems = await this.prisma.contentItem.findMany({
-      select: {
-        id: true,
-        type: true,
-        payload: true,
-      },
-    });
+    const contentItems = await this.prisma.$queryRaw<
+      Array<{ id: string; type: string; payload: unknown }>
+    >`
+      SELECT id, type, payload
+      FROM content_items
+      WHERE embedding IS NULL
+    `;
 
     for (const contentItem of contentItems) {
       const signature = this.embeddingService.buildContentSignature(
@@ -88,7 +88,7 @@ export class EmbeddingProcessor extends WorkerHost {
     }
 
     this.logger.log(
-      `Generated embeddings for ${parallels.length} Parallels and ${contentItems.length} content items for user ${userId}`,
+      `Generated embeddings for ${parallels.length} Parallels for user ${userId}, and backfilled ${contentItems.length} content item(s) still missing an embedding`,
     );
   }
 }

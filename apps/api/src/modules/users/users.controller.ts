@@ -68,11 +68,8 @@ export class UsersController {
 
   @Get('twins')
   async getTwins(@CurrentUser() currentUser: AuthenticatedUser) {
-    // Twin rows are computed here, on read, rather than by a scheduled job —
-    // there's no BullMQ job wired up anywhere in this codebase yet, and this keeps
-    // the feature self-contained. Revisit with a real background job (blueprint
-    // §16 Phase 7/9) once candidate counts make an O(n) scan per request too slow.
-    await this.usersService.refreshTwinMatches(currentUser.id);
+    // Twin rows are kept fresh by a scheduled BullMQ job (every 15 minutes, see
+    // jobs/twins/twins.module.ts) — this just reads what's already there.
     const twins = await this.usersService.getTwinMatches(currentUser.id);
 
     return apiResponse(

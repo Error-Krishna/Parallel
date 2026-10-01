@@ -38,17 +38,18 @@ describe('EmbeddingProcessor', () => {
       ]),
     },
     contentItem: {
-      findMany: vi.fn().mockResolvedValue([
-        {
-          id: 'content1',
-          type: 'POST',
-          payload: {
-            title: 'Build something small',
-            body: 'Start with one tiny idea.',
-          },
-        },
-      ]),
+      findMany: vi.fn(),
     },
+    $queryRaw: vi.fn().mockResolvedValue([
+      {
+        id: 'content1',
+        type: 'POST',
+        payload: {
+          title: 'Build something small',
+          body: 'Start with one tiny idea.',
+        },
+      },
+    ]),
   };
 
   beforeEach(async () => {
