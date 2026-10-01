@@ -5,6 +5,7 @@ import { EvolutionModule } from './jobs/evolution/evolution.module.js';
 import { EmergingParallelModule } from './jobs/emerging-parallel/emerging-parallel.module.js';
 import { EmbeddingModule } from './jobs/embedding/embedding.module.js';
 import { ConfigModule } from '@nestjs/config';
+import { CommunitiesModule } from './modules/communities/communities.module.js';
 import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
@@ -41,6 +42,7 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
     EvolutionModule,
     EmergingParallelModule,
     EmbeddingModule,
+    CommunitiesModule,
     RedisProviderModule,
     HealthModule,
     AuthModule,

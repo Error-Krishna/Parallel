@@ -23,6 +23,11 @@ export interface AppConfig {
     maximumExistingSimilarity: number;
     clusterSimilarityThreshold: number;
   };
+  community: {
+    minimumMembers: number;
+    minimumParallelStrength: number;
+    minimumIntersectionSize: number;
+  };
   bcryptSaltRounds: number;
 }
 
@@ -55,6 +60,19 @@ export default (): { app: AppConfig } => ({
       ),
       clusterSimilarityThreshold: parseFloat(
         process.env.EMERGING_PARALLEL_CLUSTER_SIMILARITY_THRESHOLD ?? '0.70',
+      ),
+    },
+    community: {
+      minimumMembers: parseInt(
+        process.env.COMMUNITY_MIN_MEMBERS ?? '5',
+        10,
+      ),
+      minimumParallelStrength: parseFloat(
+        process.env.COMMUNITY_MIN_PARALLEL_STRENGTH ?? '60',
+      ),
+      minimumIntersectionSize: parseInt(
+        process.env.COMMUNITY_MIN_INTERSECTION_SIZE ?? '2',
+        10,
       ),
     },
     // 12 is the production default (current standard baseline for 2026 hardware).
