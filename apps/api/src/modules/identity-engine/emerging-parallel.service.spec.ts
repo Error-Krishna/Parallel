@@ -185,11 +185,12 @@ describe('EmergingParallelService', () => {
   it('creates an emerging Parallel as a Ghost Parallel', async () => {
     const prisma = {
       parallelType: {
-        create: vi.fn().mockResolvedValue({
+        upsert: vi.fn().mockResolvedValue({
           id: 'parallel-type-1',
         }),
       },
       userParallel: {
+        findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
           id: 'user-parallel-1',
         }),
@@ -236,9 +237,17 @@ describe('EmergingParallelService', () => {
     });
 
     expect(
-      prisma.parallelType.create,
+      prisma.parallelType.upsert,
     ).toHaveBeenCalledWith({
-      data: {
+      where: {
+        name: 'The Urbanist',
+      },
+      update: {
+        description:
+          'You are drawn to architecture, street art and city exploration.',
+        icon: 'compass',
+      },
+      create: {
         name: 'The Urbanist',
         description:
           'You are drawn to architecture, street art and city exploration.',
