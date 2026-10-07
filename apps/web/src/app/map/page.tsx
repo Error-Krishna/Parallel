@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Sparkles, UserCircle, Users } from 'lucide-react';
+import { ArrowRight, Network, Sparkles, UserCircle, Users } from 'lucide-react';
 import type {
   ParallelEvolutionDto,
   ParallelMapResponse,
@@ -104,6 +104,16 @@ export default function MapPage() {
               title="View profile"
             >
               <UserCircle className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push('/communities')}
+              className="rounded-full border border-border p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              aria-label="Discover communities"
+              title="Discover communities"
+            >
+              <Network className="h-5 w-5" />
             </button>
 
             <button
