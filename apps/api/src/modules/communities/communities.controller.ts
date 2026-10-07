@@ -18,8 +18,16 @@ export class CommunitiesController {
     return this.communitiesService.joinCommunity(user.id, communityId);
   }
 
+  @Post(':communityId/skip')
+  skipCommunity(
+    @CurrentUser() user: { id: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.communitiesService.skipCommunity(user.id, communityId);
+  }
+
   @Get()
-  getCommunities() {
-    return this.communitiesService.getCommunities();
+  getCommunities(@CurrentUser() user: { id: string }) {
+    return this.communitiesService.getCommunities(user.id);
   }
 }

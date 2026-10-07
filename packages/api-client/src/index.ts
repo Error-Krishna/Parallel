@@ -13,6 +13,7 @@ import type {
   OnboardingQuestion,
   OnboardingStatusDto,
   ContentItemDto,
+  CommunityDto,
   ParallelEvolutionDto,
   ParallelFeedResponse,
   ParallelMapResponse,
@@ -250,6 +251,22 @@ export function createParallelApi(http: AxiosInstance) {
           '/v1/onboarding/complete',
         );
         return data;
+      },
+    },
+    communities: {
+      // Communities controller doesn't use the apiResponse() envelope (same as
+      // parallels/onboarding), so responses are read raw.
+      getRecommended: async (): Promise<CommunityDto[]> => {
+        const { data } = await http.get<CommunityDto[]>('/v1/communities');
+        return data;
+      },
+
+      join: async (communityId: string): Promise<void> => {
+        await http.post(`/v1/communities/${communityId}/join`);
+      },
+
+      skip: async (communityId: string): Promise<void> => {
+        await http.post(`/v1/communities/${communityId}/skip`);
       },
     },
     cards: {

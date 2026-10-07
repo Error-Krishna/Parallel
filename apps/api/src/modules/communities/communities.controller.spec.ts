@@ -7,6 +7,7 @@ describe('CommunitiesController', () => {
   const communitiesService = {
     getCommunities: vi.fn(),
     joinCommunity: vi.fn(),
+    skipCommunity: vi.fn(),
   };
 
   beforeEach(() => {
@@ -24,8 +25,13 @@ describe('CommunitiesController', () => {
 
     communitiesService.getCommunities.mockResolvedValue(communities);
 
-    await expect(controller.getCommunities()).resolves.toEqual(communities);
-    expect(communitiesService.getCommunities).toHaveBeenCalledOnce();
+    await expect(
+      controller.getCommunities({ id: 'user-1' }),
+    ).resolves.toEqual(communities);
+
+    expect(communitiesService.getCommunities).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('joins a community for the authenticated user', async () => {
@@ -39,6 +45,22 @@ describe('CommunitiesController', () => {
     ).resolves.toBeUndefined();
 
     expect(communitiesService.joinCommunity).toHaveBeenCalledWith(
+      'user-1',
+      'community-1',
+    );
+  });
+
+  it('skips a community for the authenticated user', async () => {
+    communitiesService.skipCommunity.mockResolvedValue(undefined);
+
+    await expect(
+      controller.skipCommunity(
+        { id: 'user-1' },
+        'community-1',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(communitiesService.skipCommunity).toHaveBeenCalledWith(
       'user-1',
       'community-1',
     );
