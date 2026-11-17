@@ -8,7 +8,7 @@
 
 ## 1. Conventions
 
-- **Base URL**: `http://localhost:3001` locally (`NEXT_PUBLIC_API_URL` in `apps/web`). All routes are versioned via NestJS URI versioning, already configured in `main.ts`: every path is prefixed `/v1/...` (e.g. the health check is `/v1/health`, not `/health`).
+- **Base URL**: `http://localhost:4000` locally (or `NEXT_PUBLIC_API_URL` in `apps/web`). All routes are versioned via NestJS global prefix `/v1/...` (e.g. the health check is `/v1/health`, not `/health`).
 - **Auth**: Bearer JWT in `Authorization: Bearer <token>` header, issued by the `auth` module (Phase 5). Endpoints marked 🔒 below require it; NestJS route guards enforce this, not manual checks in controller bodies.
 - **Content type**: `application/json` throughout.
 - **Validation**: every request body is a `class-validator` DTO. The global `ValidationPipe` (`whitelist: true, forbidNonWhitelisted: true, transform: true`, set in `main.ts`) strips unknown fields and rejects anything that doesn't match the DTO shape — a 400 with a validation error array, before the request ever reaches a controller method.
@@ -33,24 +33,26 @@
   ```
   `message` is always either a plain string (most thrown exceptions) or a string array (class-validator's `ValidationPipe` errors) — **never** a nested object. `error` is optional (the short HTTP reason phrase) and only present when the underlying exception provided one. Prisma errors are mapped rather than leaked: `P2002` (unique constraint) → `409 Conflict`, `P2025` (record not found) → `404 Not Found`, anything else → generic `500` (logged server-side, not detailed to the client). No stack traces or internal details are ever sent to the client.
 - **Pagination**: cursor-based (`?cursor=<id>&limit=<n>`) for any list endpoint that can grow unbounded (feed, notifications) — not offset-based, to stay stable as new items are inserted.
-- **Rate limiting**: Redis-backed, applied per-route via a guard once auth exists (Phase 10 Hardening) — every public-facing mutation endpoint needs one, not just the ones that "feel" abuse-prone.
+- **Rate limiting**: Redis-backed (`RedisRateLimitGuard` + `@RateLimit(...)` in `common/guards/rate-limit.guard.ts`), emitting `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` on `429 Too Many Requests`. Applied to auth endpoints (`signup`, `login`) and extensible to any route.
 
 ---
 
 ## 2. Already implemented
 
-| Method  | Path                  | Auth | Description                                                                                                                |
-| ------- | --------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
-| `GET`   | `/v1`                 | —    | Root status check — `{ "name": "Parallel API", "status": "running" }`                                                      |
-| `GET`   | `/v1/health`          | —    | Pings Postgres + Redis, returns `HealthResponse` (see `shared-types`) — used by deploy/monitoring, not by the frontend app |
-| `POST`  | `/v1/auth/signup`     | —    | `SignupDto { email, username, password }` → `data: { user: PublicUser, accessToken }`                                      |
-| `POST`  | `/v1/auth/login`      | —    | `LoginDto { email, password }` → `data: { user: PublicUser, accessToken }`                                                 |
-| `POST`  | `/v1/auth/logout`     | 🔒   | → `data: null` — **actually revokes the token** (Redis-backed, see §3), not a client-side no-op                            |
-| `GET`   | `/v1/users/me`        | 🔒   | → `data: PublicUser`                                                                                                       |
-| `PATCH` | `/v1/users/me`        | 🔒   | `UpdateUserDto` (partial, rejects an empty body) → `data: PublicUser`                                                      |
-| `GET`   | `/v1/users/:username` | 🔒   | → `data: PublicUser`                                                                                                       |
+| Method   | Path                  | Auth | Description                                                                                                                |
+| -------- | --------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1`                 | —    | Root status check — `{ "name": "Parallel API", "status": "running" }`                                                      |
+| `GET`    | `/v1/health`          | —    | Pings Postgres + Redis, returns `HealthResponse` (see `shared-types`) — used by deploy/monitoring, not by the frontend app |
+| `POST`   | `/v1/auth/signup`     | —    | `SignupDto { email, username, password }` → `data: { user: PublicUser, accessToken }`                                      |
+| `POST`   | `/v1/auth/login`      | —    | `LoginDto { email, password }` → `data: { user: PublicUser, accessToken }`                                                 |
+| `POST`   | `/v1/auth/logout`     | 🔒   | → `data: null` — **actually revokes the token** (Redis-backed, see §3), not a client-side no-op                            |
+| `GET`    | `/v1/users/me`        | 🔒   | → `data: PublicUser`                                                                                                       |
+| `PATCH`  | `/v1/users/me`        | 🔒   | `UpdateUserDto` (partial, rejects an empty body) → `data: PublicUser`                                                      |
+| `GET`    | `/v1/users/me/export` | 🔒   | → `data: UserDataExport` — full self-serve JSON export (explicitly omits `passwordHash`)                                   |
+| `DELETE` | `/v1/users/me`        | 🔒   | `204 No Content` — cascading account deletion + immediate Redis JWT revocation (`auth:revoked:<jti>`)                      |
+| `GET`    | `/v1/users/:username` | 🔒   | → `data: PublicUser`                                                                                                       |
 
-Everything else in this document below §3 is spec, not yet built — update this table as each module ships.
+See §4–§10 below for the full set of implemented endpoints across Onboarding, Parallels, Quests, Content, Social, Communities, Notifications, Cards, and Wrapped.
 
 ---
 
@@ -82,90 +84,95 @@ Username rules (`common/validators/username.validator.ts`'s `@IsUsername()`) are
 
 ---
 
-## 5. Identity Engine / Parallel Map — 🔶 partially implemented (`modules/identity-engine`, `modules/parallels`)
+## 5. Identity Engine / Parallel Map — ✅ implemented (`modules/identity-engine`, `modules/parallels`)
 
-**Implemented, verified working**: `GET /v1/parallels/map` (matches spec exactly). `GET /v1/parallels/:id` **differs from the original spec below** — it returns `ParallelTypeDto` (the Parallel type's own info: id/name/description/icon), not `UserParallelDto` (the user's specific relationship to it) as originally written here; update this if that's ever unified. `POST /v1/parallels/:id/enter` also exists (not in the original table at all) — logs a `PARALLEL_ENTER` interest signal, returns the same `ParallelTypeDto`. **Not yet built**: make-public/hide/unhide/dismiss and the evolution endpoint below are all still spec.
+Onboarding creates 4 **public** starter Parallels (`isGhost: false`) so new users immediately appear on profiles, discovery, and Twin matching. Newly emerging Parallels discovered later by `EmergingParallelProcessor` default to **Ghost Mode** (`isGhost: true`, private) until the user explicitly publishes them.
 
-| Method   | Path                            | Auth | Request | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------- | ------------------------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET`    | `/v1/parallels/map`             | 🔒   | —       | `ParallelMapResponse` (current user's full map — see `shared-types`)                                                                                                                                                                                                                                                                                                                                                                                               |
-| `GET`    | `/v1/parallels/:id`             | 🔒   | —       | `UserParallelDto` detail                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `POST`   | `/v1/parallels/:id/make-public` | 🔒   | —       | flips `isGhost → false`; `204`                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `POST`   | `/v1/parallels/:id/hide`        | 🔒   | —       | sets `isHidden → true`; `204` — reversible                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `POST`   | `/v1/parallels/:id/unhide`      | 🔒   | —       | sets `isHidden → false`; `204`                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `DELETE` | `/v1/parallels/:id`             | 🔒   | —       | user-initiated "reject" (Flow 3a) or "remove" (Flow 14) — same mechanism, sets `dismissedAt` (soft delete, `DATABASE.md` §2.3) rather than a hard delete, so the Identity Engine can check for it before re-suggesting the same `(user, parallelType)` pair; `204`                                                                                                                                                                                                 |
-| `GET`    | `/v1/parallels/evolution`       | 🔒   | —       | **Implemented, differs from spec**: whole-map evolution, not per-Parallel — grouped by `parallelTypeId`, each with `{ currentStrengthPct, previousStrengthPct, deltaPct }` (`deltaPct: null` until a second snapshot exists for that Parallel). No `?range=` param yet. Snapshots are only captured once, right after onboarding — real accumulation over time needs a scheduled job (later phase), so `deltaPct` will stay `null` for everyone until that exists. |
+> **ID convention:** `GET /v1/parallels/:id`, `POST /v1/parallels/:id/enter`, `/feed`, `/quests`, and `/people` take a `ParallelType.id`. Visibility lifecycle mutations (`make-public`, `hide`, `unhide`, `DELETE`) take a `UserParallel.id` and enforce atomic owner-scoped writes with enumeration-safe `404` on non-owned/nonexistent records.
 
-Scoring/embedding/new-Parallel-detection are **background jobs** (BullMQ, `apps/api/src/jobs/`), not synchronous endpoints — nothing in this section computes a score inline on request.
+| Method   | Path                            | Auth | Request | Response                                                                                                                                                       |
+| -------- | ------------------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/parallels/map`             | 🔒   | —       | `ParallelMapResponse` (visible + Ghost Parallels on the map; excludes hidden & dismissed)                                                                      |
+| `GET`    | `/v1/parallels/manage`          | 🔒   | —       | `UserParallelDto[]` (active Public, Ghost, and Hidden Parallels for Profile > My Parallels; excludes dismissed)                                                |
+| `GET`    | `/v1/parallels/:id`             | 🔒   | —       | `ParallelTypeDto` detail (`id`, `name`, `description`, `icon`)                                                                                                 |
+| `POST`   | `/v1/parallels/:id/enter`       | 🔒   | —       | logs a `PARALLEL_ENTER` interest signal, returns `ParallelTypeDto`                                                                                             |
+| `POST`   | `/v1/parallels/:id/make-public` | 🔒   | —       | `200 OK` — atomically flips `isGhost → false` (idempotent, preserves `isHidden`), returns updated `UserParallelDto`                                            |
+| `POST`   | `/v1/parallels/:id/hide`        | 🔒   | —       | `200 OK` — sets `isHidden → true` (reversible), returns updated `UserParallelDto`                                                                              |
+| `POST`   | `/v1/parallels/:id/unhide`      | 🔒   | —       | `200 OK` — atomically sets `isHidden → false` (idempotent, preserves `isGhost`), returns updated `UserParallelDto`                                             |
+| `DELETE` | `/v1/parallels/:id`             | 🔒   | —       | `204 No Content` — soft-delete setting `dismissedAt` (idempotent), preventing Identity Engine re-suggestion                                                    |
+| `GET`    | `/v1/parallels/evolution`       | 🔒   | —       | whole-map evolution grouped by `parallelTypeId` with `{ currentStrengthPct, previousStrengthPct, deltaPct }`, powered by `EvolutionProcessor` BullMQ snapshots |
+
+Scoring, embedding (`EmbeddingProcessor` with local 384-dim HuggingFace model), evolution snapshots (`EvolutionProcessor`), emerging Parallel detection (`EmergingParallelProcessor` with optional free-tier Groq naming), Twin matching (`TwinsProcessor`), and Community clustering (`CommunitiesProcessor`) all run as **BullMQ background jobs** (`apps/api/src/jobs/`).
 
 ---
 
 ## 6. Quests & Streaks — ✅ implemented (`modules/quests`)
 
-**Implemented**: `GET /v1/parallels/:id/quests`, `POST /v1/quests/:id/start`, and `POST /v1/quests/:id/complete-step`. The last one **differs from the original spec below**: it advances the current step by one rather than targeting a specific `:stepIndex`, and grants the reward via a real `UserQuestReward` table on completion. Streaks are real too (`StreakService.touch()`, `modules/quests/streak.service.ts`) — a 48-hour window, shared between quest-step completion and content interactions (`ParallelsService.createContentInteraction`), so either one keeps a Parallel's streak alive. **No frontend for Quests exists yet.**
+**Implemented**: `GET /v1/parallels/:id/quests`, `GET /v1/quests/:questId`, `POST /v1/quests/:id/start`, and `POST /v1/quests/:id/complete-step`, wired into the Quests tab on `/parallel/[id]` with completion rewards (`UserQuestReward`) and `QUEST_COMPLETED` notifications. Streaks (`StreakService.touch()`, 48-hour window) are shared between quest steps and content interactions. Starter quests and content items can be idempotently seeded via `apps/api/scripts/seed-starter-content.ts`.
 
-| Method | Path                           | Auth | Request | Response                                                                                                               |
-| ------ | ------------------------------ | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/v1/parallels/:id/quests`     | 🔒   | —       | quests scoped to this Parallel type, each with the current user's `progress`                                           |
-| `POST` | `/v1/quests/:id/start`         | 🔒   | —       | creates `UserQuestProgress` row, `status: IN_PROGRESS` — idempotent if already started                                 |
-| `POST` | `/v1/quests/:id/complete-step` | 🔒   | —       | advances `currentStep` by one; on the final step, sets `status: COMPLETED` and grants the reward via `UserQuestReward` |
-
-**Not yet built**: a standalone `GET /v1/quests/:id`.
-
----
-
-## 7. Feed & Content — ✅ implemented (as part of `modules/parallels`, not a separate `modules/feed`)
-
-Built as `ParallelsController`/`ContentController` inside `modules/parallels`, not a standalone feed module as originally planned — update if that ever gets split out. `GET /v1/parallels/:id/feed` is genuinely cursor-paginated per §1's convention. In practice the feed is usually empty right now since nothing seeds `ContentItem` rows yet (no content-creation flow exists) — the frontend (`app/parallel/[id]/page.tsx`) shows an explicit empty state for this rather than a blank screen.
-
-| Method | Path                           | Auth | Request                                       | Response                               |
-| ------ | ------------------------------ | ---- | --------------------------------------------- | -------------------------------------- |
-| `GET`  | `/v1/parallels/:id/feed`       | 🔒   | `?cursor=&limit=`                             | paginated `ContentItem[]`              |
-| `GET`  | `/v1/content/:id`              | 🔒   | —                                             | content detail                         |
-| `POST` | `/v1/content/:id/interactions` | 🔒   | `{ signalType: 'VIEW'\|'LIKE'\|'SAVE'\|... }` | `204` — writes an `InterestSignal` row |
+| Method | Path                           | Auth | Request | Response                                                                                                                         |
+| ------ | ------------------------------ | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/parallels/:id/quests`     | 🔒   | —       | quests scoped to this Parallel type, each with the current user's `progress`                                                     |
+| `GET`  | `/v1/quests/:questId`          | 🔒   | —       | single `QuestDto` with the authenticated user's progress (`404` if not found)                                                    |
+| `POST` | `/v1/quests/:id/start`         | 🔒   | —       | creates `UserQuestProgress` row, `status: IN_PROGRESS` — idempotent if already started                                           |
+| `POST` | `/v1/quests/:id/complete-step` | 🔒   | —       | advances `currentStep` by one; on the final step, sets `status: COMPLETED`, grants `UserQuestReward`, and creates a notification |
 
 ---
 
-## 8. Social — ✅ implemented (`modules/users`, `modules/parallels`)
+## 7. Feed & Content — ✅ implemented (`modules/parallels`)
 
-**Implemented**: `GET /v1/parallels/:id/people`, follow/unfollow, and Twin matching. Follow/unfollow are at `POST /v1/users/:userId/follow` / `POST /v1/users/:userId/unfollow` (by ID and both `POST`, not `DELETE` as originally spec'd below) — both idempotent and reject self-follow/self-unfollow. `GET /v1/users/twins` **recomputes on every read** (`UsersService.refreshTwinMatches`, called from `UsersController.getTwins`) rather than via a scheduled job — no BullMQ job is wired up anywhere in this codebase yet, so this keeps the feature self-contained; revisit with a real background job once candidate counts make an O(n) scan per request too slow. Matching is a weighted-strength similarity across each pair's _visible_ (`isGhost: false, isHidden: false, dismissedAt: null`) shared Parallels, persisted above a 70% threshold with the `userAId < userBId` canonical ordering the schema comment requires (`DATABASE.md` §2.6). **Not yet built**: Communities and Collab are both still spec.
+Built inside `modules/parallels` (`ParallelsController` / `ContentController`). `GET /v1/parallels/:id/feed` is cursor-paginated. Starter curated items are seeded via `apps/api/scripts/seed-starter-content.ts`.
 
-| Method | Path                          | Auth | Request                            | Response                                                          |
-| ------ | ----------------------------- | ---- | ---------------------------------- | ----------------------------------------------------------------- |
-| `POST` | `/v1/users/:userId/follow`    | 🔒   | —                                  | `204` — idempotent, rejects self-follow                           |
-| `POST` | `/v1/users/:userId/unfollow`  | 🔒   | —                                  | `204` — idempotent, rejects self-unfollow                         |
-| `GET`  | `/v1/users/following`         | 🔒   | —                                  | current user's list of followee IDs                               |
-| `GET`  | `/v1/users/:userId/parallels` | 🔒   | —                                  | that user's _visible_ Parallels only (`UserVisibleParallelDto[]`) |
-| `GET`  | `/v1/parallels/:id/people`    | 🔒   | —                                  | suggested people, scoped to this Parallel's intersections         |
-| `GET`  | `/v1/users/twins`             | 🔒   | —                                  | current user's computed Twin matches, recomputed on every call    |
-| `GET`  | `/v1/communities`             | 🔒   | `?parallelTypeId=`                 | communities related to a Parallel type — **spec only**            |
-| `POST` | `/v1/communities/:id/join`    | 🔒   | —                                  | `204` — **spec only**                                             |
-| `POST` | `/v1/collab/invite`           | 🔒   | `{ toUsername, myParallelTypeId }` | `CollabSession` (`PENDING`) — **spec only**                       |
-| `POST` | `/v1/collab/:id/accept`       | 🔒   | `{ myParallelTypeId }`             | `CollabSession` (`ACTIVE`) — **spec only**                        |
+| Method   | Path                           | Auth | Request                                       | Response                                         |
+| -------- | ------------------------------ | ---- | --------------------------------------------- | ------------------------------------------------ |
+| `GET`    | `/v1/parallels/:id/feed`       | 🔒   | `?cursor=&limit=`                             | paginated `ParallelFeedResponse`                 |
+| `GET`    | `/v1/content/:id`              | 🔒   | —                                             | `ContentItemDto` detail                          |
+| `POST`   | `/v1/content/:id/interactions` | 🔒   | `{ signalType: 'VIEW'\|'LIKE'\|'SAVE'\|... }` | `204` — writes `InterestSignal` & touches streak |
+| `DELETE` | `/v1/content/:id/interactions` | 🔒   | `?signalType=LIKE\|SAVE`                      | `204` — removes toggleable interaction           |
 
 ---
 
-## 9. Growth mechanics (Phase 9 — `modules/wrapped`, `modules/cards`)
+## 8. Social & Communities — ✅ implemented (`modules/users`, `modules/parallels`, `modules/communities`)
 
-| Method | Path                 | Auth       | Request                                        | Response                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------ | -------------------- | ---------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST` | `/v1/cards`          | 🔒         | `CreateIdentityCardDto { cardType, sourceId }` | queues a render job, returns `{ jobId }`; client polls or receives a `notifications` event when ready. `sourceId` must point to a real row matching `cardType` (`UserParallel.id` for `PARALLEL`, `Quest.id` for `QUEST`, `ParallelWrapped.id` for `WRAPPED`, `Twin.id` for `TWIN`, `CollabSession.id` for `COLLAB`) — stored on the resulting row as `sourceType`/`sourceId` (`DATABASE.md` §2.7) |
-| `GET`  | `/v1/cards/:id`      | — (public) | —                                              | `IdentityCardDto` — this is what the public `card/[id]` Next.js route (§10.1) fetches server-side                                                                                                                                                                                                                                                                                                  |
-| `GET`  | `/v1/wrapped/:id`    | — (public) | —                                              | `WrappedRecapDto`, backing the public `wrapped/[id]` route                                                                                                                                                                                                                                                                                                                                         |
-| `GET`  | `/v1/wrapped/latest` | 🔒         | —                                              | current user's most recent `WrappedRecapDto`, or `null` if none exists yet                                                                                                                                                                                                                                                                                                                         |
+Follow/unfollow (`POST /v1/users/:userId/follow` → `201` / `POST /v1/users/:userId/unfollow` → `204`) are idempotent, reject self-follow, and emit a `NEW_FOLLOWER` notification. Twin matching runs asynchronously via BullMQ (`TwinsProcessor`) using inverted-index candidate pruning (`UsersService.getTwinCandidatePairs(minSharedParallels = 2)`) and notifies both users on new matches; `GET /v1/users/twins` reads persisted rows from `parallel_twins`. Communities (`GET /v1/communities`, `POST /v1/communities/:id/join`, `POST /v1/communities/:id/skip`) are implemented alongside `CommunitiesProcessor`.
 
-Note the two public (no-auth) endpoints above — they exist specifically so shared card/Wrapped links render correctly for people who don't have an account, per the blueprint's growth-loop design (§10.1, §4.3/§4.4).
+| Method | Path                          | Auth | Request | Response                                                          |
+| ------ | ----------------------------- | ---- | ------- | ----------------------------------------------------------------- |
+| `POST` | `/v1/users/:userId/follow`    | 🔒   | —       | `201` — idempotent, rejects self-follow, notifies followee        |
+| `POST` | `/v1/users/:userId/unfollow`  | 🔒   | —       | `204` — idempotent, rejects self-unfollow                         |
+| `GET`  | `/v1/users/following`         | 🔒   | —       | current user's list of followee IDs                               |
+| `GET`  | `/v1/users/:userId/parallels` | 🔒   | —       | that user's _visible_ Parallels only (`UserVisibleParallelDto[]`) |
+| `GET`  | `/v1/parallels/:id/people`    | 🔒   | —       | suggested people exploring this Parallel visibly                  |
+| `GET`  | `/v1/users/twins`             | 🔒   | —       | current user's persisted Twin matches (`TwinMatchDto[]`)          |
+| `GET`  | `/v1/communities`             | 🔒   | —       | recommended communities for the current user (`CommunityDto[]`)   |
+| `POST` | `/v1/communities/:id/join`    | 🔒   | —       | `204` — joins community                                           |
+| `POST` | `/v1/communities/:id/skip`    | 🔒   | —       | `204` — skips community recommendation                            |
 
 ---
 
-## 10. Notifications & real-time (Phase 8 — `modules/notifications`, `src/websockets/`)
+## 9. Growth mechanics — ✅ implemented (`modules/cards`, `modules/wrapped`)
 
-| Method | Path                         | Auth | Request           | Response                   |
-| ------ | ---------------------------- | ---- | ----------------- | -------------------------- |
-| `GET`  | `/v1/notifications`          | 🔒   | `?cursor=&limit=` | paginated `Notification[]` |
-| `POST` | `/v1/notifications/:id/read` | 🔒   | —                 | `204`                      |
+| Method | Path                   | Auth       | Request                                        | Response                                                                                                                                                                            |
+| ------ | ---------------------- | ---------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/v1/cards`            | 🔒         | `CreateIdentityCardDto { cardType, sourceId }` | `201` — validates ownership & rejects private Ghost/hidden Parallels (`400`); persists `IdentityCard` with self-hosted SVG URL `/v1/cards/:id/image`; returns `{ id, jobId, card }` |
+| `GET`  | `/v1/cards/me`         | 🔒         | —                                              | `IdentityCardDto[]` created by the authenticated user                                                                                                                               |
+| `GET`  | `/v1/cards/:id`        | — (public) | —                                              | `IdentityCardDto` with sanitized public metadata, backing `/card/[id]`                                                                                                              |
+| `GET`  | `/v1/cards/:id/image`  | — (public) | —                                              | `image/svg+xml` deterministic 1080×1920 portrait card (XML-escaped, `X-Content-Type-Options: nosniff`, zero paid storage)                                                           |
+| `POST` | `/v1/wrapped/generate` | 🔒         | `{ period?: 'MONTHLY' \| 'ANNUAL' }`           | `201` — computes & persists `ParallelWrapped` strictly from public Parallels (excluding Ghost/hidden), emits `WRAPPED_READY` notification, returns `WrappedRecapDto`                |
+| `GET`  | `/v1/wrapped/latest`   | 🔒         | —                                              | current user's most recent `WrappedRecapDto`, or `null` if none exists yet                                                                                                          |
+| `GET`  | `/v1/wrapped/:id`      | — (public) | —                                              | `WrappedRecapDto` with resolved `username` and `parallelNames`, backing `/wrapped/[id]`                                                                                             |
 
-Real-time delivery (streak warnings, quest completions, Twin matches) is pushed over Socket.IO (`src/websockets/`), authenticated via the same JWT passed at connection time. The REST endpoints above are the durable fallback/history — the client should not rely on REST polling as the primary delivery mechanism once the WebSocket gateway exists.
+---
+
+## 10. Notifications — ✅ implemented (`modules/notifications`)
+
+| Method | Path                         | Auth | Request           | Response                                                                                                      |
+| ------ | ---------------------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/v1/notifications`          | 🔒   | `?cursor=&limit=` | `NotificationsListResponse { items, nextCursor, unreadCount }` (cursor-paginated, ownership-validated cursor) |
+| `POST` | `/v1/notifications/read-all` | 🔒   | —                 | `200 OK` — `{ updatedCount }`                                                                                 |
+| `POST` | `/v1/notifications/:id/read` | 🔒   | —                 | `204 No Content` — atomic owner-scoped mark-read (idempotent; enumeration-safe `404` for foreign/missing ID)  |
+
+Durable notifications are persisted in `notifications` on follow (`NEW_FOLLOWER`), new Twin match (`TWIN_MATCHED`), Quest completion (`QUEST_COMPLETED`), and Wrapped generation (`WRAPPED_READY`), and surfaced in the `NotificationBell` popover in the `/map` header.
 
 ---
 

@@ -11,7 +11,7 @@
 > - `BLOCKED` — Blocked by an external dependency, paid-only requirement, or uncommitted/unmerged prerequisite.
 
 **Last Updated:** 2026-11-18
-**Baseline Commit:** `3396ead` (`origin/main`)
+**Baseline Commit:** `3396ead` → **Completed Milestone Head:** `c164e74` (`origin/main`)
 
 ---
 
@@ -100,24 +100,24 @@ Every new milestone implemented under this initiative is built and committed cle
 
 ---
 
-## 3. Execution Roadmap (Sequential Dependency Order)
+## 3. Execution Roadmap & Delivery Log
 
-1. **Stage 1 (Done in this commit):** Establish `docs/PRODUCT_COMPLETION_TRACKER.md`.
-2. **Stage 2 — Critical Foundation & Technical Debt:**
-   - **M2.1:** Fix `infra/docker/api.Dockerfile` and `infra/docker/web.Dockerfile` clean builds (`AUDIT-006`).
-   - **M2.2:** Fix `GroqParallelNamingProvider` config key (`'app.groqApiKey'`), add unit tests, document `GROQ_API_KEY` in `.env.example` (`AUDIT-004`).
-   - **M2.3:** Fix $O(N^2)$ fan-out in `TwinsProcessor` with inverted-index candidate pruning + unit tests (`AUDIT-008`).
-   - **M2.4:** Add missing PostgreSQL performance indexes (`user_parallels.parallel_type_id`, `parallel_twins.user_b_id`, `community_members.user_id`) via Prisma migration (`AUDIT-009`).
-   - **M2.5:** Add Redis-backed API rate limiting guard (`@RateLimit` on auth & sensitive mutations, zero new paid/heavy deps) + unit & E2E tests (`AUDIT-010`).
-   - **M2.6:** Add Web route protection & 401 session-expiry auto-logout/redirect (`AUDIT-007`).
-3. **Stage 3 — Complete Parallel Lifecycle, Privacy & Core Experience:**
-   - **M3.1:** Complete Parallel lifecycle (`POST /v1/parallels/:id/unhide`, `DELETE /v1/parallels/:id` soft-dismiss, `GET /v1/parallels/manage`) + Ghost Mode parity on `/parallel/[id]` + Profile `My Parallels` management UI + unit & E2E tests.
-   - **M3.2:** Self-serve Privacy & Data controls (`GET /v1/users/me/export`, `DELETE /v1/users/me` with immediate Redis token revocation, Profile Logout + Visibility Settings + Export + Delete UI) + unit & E2E tests.
-   - **M3.3:** Curated starter content & Quest seed script + `GET /v1/quests/:id` + Quest completion celebration UX.
-4. **Stage 4 — Growth & Real-Time Features:**
-   - **M4.1:** Real `NotificationsModule` (`GET /v1/notifications` cursor-paginated, `GET /v1/notifications/unread-count`, `POST /v1/notifications/:id/read`, `POST /v1/notifications/read-all`) + domain triggers + Notification Center UI in header + unit & E2E tests.
-   - **M4.2:** Real `CardsModule` (`POST /v1/cards`, `GET /v1/cards/:id` public, `GET /v1/cards/:id/image` deterministic SVG renderer — 100% free-tier self-hosted) + public `/card/[id]` share page + unit & E2E tests.
-   - **M4.3:** Real `WrappedModule` (`POST /v1/wrapped/generate`, `GET /v1/wrapped/latest`, `GET /v1/wrapped/:id` public) + public `/wrapped/[id]` story recap page + unit & E2E tests.
-5. **Stage 5 — Documentation Sync & Final Production Readiness Verification:**
-   - Synchronize `API.md`, `DATABASE.md`, `USER_FLOW.md`, `FUTURE_IMPLEMENTATIONS.md`, and `docs/PRODUCT_COMPLETION_TRACKER.md`.
-   - Full regression pass across all lint, typecheck, unit, E2E, and production build checks.
+1. **Stage 1 — Complete (`ae25b88`):** Established `docs/PRODUCT_COMPLETION_TRACKER.md`.
+2. **Stage 2 — Critical Foundation & Technical Debt — Complete:**
+   - **M2.1 (`603d846`):** Fixed `infra/docker/api.Dockerfile` and `infra/docker/web.Dockerfile` clean builds + `.dockerignore` (`AUDIT-006`).
+   - **M2.2 (`d4b3687`):** Fixed `GroqParallelNamingProvider` config key (`'app.groqApiKey'`), added 3 unit tests, documented `GROQ_API_KEY` in `.env.example` (`AUDIT-004`).
+   - **M2.3 (`82d4ce1`):** Fixed $O(N^2)$ fan-out in `TwinsProcessor` with inverted-index candidate pruning + batched `addBulk()` + 5 unit tests (`AUDIT-008`).
+   - **M2.4 (`c57797e`):** Added missing PostgreSQL performance indexes (`user_parallels.parallel_type_id`, `parallel_twins.user_b_id`, `community_members.user_id`, `follows.followee_id`) via Prisma migration `20261118000000_add_performance_indexes` (`AUDIT-009`).
+   - **M2.5 (`deb78fb`):** Added Redis-backed API rate limiting guard (`RedisRateLimitGuard` + `@RateLimit` on auth signup/login, zero new deps) + 4 unit tests (`AUDIT-010`).
+   - **M2.6 (`962d56d`):** Added Web route protection (`AuthRouteGuard`) & 401 session-expiry auto-logout/redirect + 10 web unit tests (`AUDIT-007`).
+3. **Stage 3 — Complete Parallel Lifecycle, Privacy & Core Experience — Complete:**
+   - **M3.1 (`8ac19e4`):** Added `GET /v1/parallels/manage`, `POST /v1/parallels/:id/unhide`, `DELETE /v1/parallels/:id` (soft-dismiss) + unit & E2E tests.
+   - **M3.2 (`fe1b049`, `aed24d9`, `be9d127`):** Added `GET /v1/users/me/export`, `DELETE /v1/users/me` (cascading delete + immediate Redis JWT revocation), Profile Privacy Center + My Parallels Manager + Logout UI, and Ghost Mode parity on `/parallel/[id]` + unit & E2E tests.
+   - **M3.3 (`07b7b1d`):** Added `GET /v1/quests/:questId` and idempotent starter feed/quest seed script (`apps/api/scripts/seed-starter-content.ts`) + unit tests.
+4. **Stage 4 — Growth & Real-Time Features — Complete:**
+   - **M4.1 (`9539c1a`):** Added `NotificationsModule` (`GET /v1/notifications`, `POST /v1/notifications/:id/read`, `POST /v1/notifications/read-all`), domain triggers (follow, Twin match, Quest completion), and `NotificationBell` UI in `/map` header + unit & E2E tests.
+   - **M4.2 (`f0a4a8e`):** Added `CardsModule` (`POST /v1/cards`, `GET /v1/cards/me`, public `GET /v1/cards/:id` & XSS-safe SVG `GET /v1/cards/:id/image`, Ghost Mode enforcement), public `/card/[id]` share page, and Share Card trigger on `/parallel/[id]` + unit & E2E tests.
+   - **M4.3 (`c164e74`):** Added `WrappedModule` (`POST /v1/wrapped/generate`, `GET /v1/wrapped/latest`, public `GET /v1/wrapped/:id`, Ghost/hidden exclusion, quiet-month fallback, `WRAPPED_READY` notification), public `/wrapped/[id]` interactive story recap page, and Profile Wrapped generator CTA + unit & E2E tests.
+5. **Stage 5 — Documentation Sync & Final Production Readiness Verification — Complete:**
+   - Synchronized `API.md`, `DATABASE.md`, and `docs/PRODUCT_COMPLETION_TRACKER.md` with the implemented codebase.
+   - Verified full monorepo regression suite (shared packages, Prisma validate/migrate status, API lint/unit/E2E/build, Web lint/unit/typecheck/build).
