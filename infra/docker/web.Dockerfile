@@ -17,11 +17,17 @@ FROM base AS build
 WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/web apps/web
+RUN pnpm --filter @parallel/shared-types build \
+  && pnpm --filter @parallel/api-client build \
+  && pnpm --filter @parallel/ui build
 RUN pnpm --filter web build
 
 FROM base AS runner
 WORKDIR /repo/apps/web
 ENV NODE_ENV=production
+COPY --from=build /repo/package.json /repo/pnpm-workspace.yaml /repo/
+COPY --from=build /repo/node_modules /repo/node_modules
+COPY --from=build /repo/packages /repo/packages
 COPY --from=build /repo/apps/web/public ./public
 COPY --from=build /repo/apps/web/.next ./.next
 COPY --from=build /repo/apps/web/node_modules ./node_modules

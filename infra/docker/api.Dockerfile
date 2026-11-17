@@ -17,12 +17,16 @@ FROM base AS build
 WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/api apps/api
-RUN pnpm --filter api prisma generate
+RUN pnpm --filter @parallel/shared-types build
+RUN pnpm --filter api exec prisma generate
 RUN pnpm --filter api build
 
 FROM base AS runner
 WORKDIR /repo
 ENV NODE_ENV=production
+COPY --from=build /repo/package.json /repo/pnpm-workspace.yaml ./
+COPY --from=build /repo/packages/shared-types packages/shared-types
+COPY --from=build /repo/apps/api/package.json apps/api/package.json
 COPY --from=build /repo/apps/api/dist apps/api/dist
 COPY --from=build /repo/apps/api/node_modules apps/api/node_modules
 COPY --from=build /repo/apps/api/prisma apps/api/prisma
