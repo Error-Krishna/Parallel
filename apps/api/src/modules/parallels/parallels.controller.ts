@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -25,6 +26,13 @@ export class ParallelsController {
   @Get('map')
   getMap(@CurrentUser() user: { id: string }) {
     return this.parallelsService.getMap(user.id);
+  }
+
+  // Returns all non-dismissed Parallels owned by the caller (Public, Ghost, and Hidden)
+  // so Profile > My Parallels can manage visibility and unhide hidden Parallels.
+  @Get('manage')
+  listManageable(@CurrentUser() user: { id: string }) {
+    return this.parallelsService.listManageableParallels(user.id);
   }
 
   @Get('evolution')
@@ -87,5 +95,25 @@ export class ParallelsController {
     @Param('parallelId') parallelId: string,
   ) {
     return this.parallelsService.hideParallel(user.id, parallelId);
+  }
+
+  // Restores a previously hidden Parallel back onto the owner's map without changing isGhost.
+  @Post(':parallelId/unhide')
+  @HttpCode(HttpStatus.OK)
+  unhideParallel(
+    @CurrentUser() user: { id: string },
+    @Param('parallelId') parallelId: string,
+  ) {
+    return this.parallelsService.unhideParallel(user.id, parallelId);
+  }
+
+  // Permanent soft-delete (sets dismissedAt) for Reject (Flow 3a) or Remove (Flow 14).
+  @Delete(':parallelId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  dismissParallel(
+    @CurrentUser() user: { id: string },
+    @Param('parallelId') parallelId: string,
+  ) {
+    return this.parallelsService.dismissParallel(user.id, parallelId);
   }
 }

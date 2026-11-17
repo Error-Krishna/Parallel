@@ -407,4 +407,146 @@ export class ParallelsService {
       discoveredAt: record.discoveredAt.toISOString(),
     };
   }
+
+  async listManageableParallels(userId: string): Promise<UserParallelDto[]> {
+    const rows = await this.prisma.userParallel.findMany({
+      where: {
+        userId,
+        dismissedAt: null,
+      },
+      orderBy: {
+        strengthPct: 'desc',
+      },
+      select: {
+        id: true,
+        strengthPct: true,
+        momentum: true,
+        streakCount: true,
+        isGhost: true,
+        isHidden: true,
+        dismissedAt: true,
+        suggestionReason: true,
+        discoveredAt: true,
+        parallelType: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            icon: true,
+          },
+        },
+      },
+    });
+
+    return rows.map((record) => ({
+      id: record.id,
+      parallelType: record.parallelType,
+      strengthPct: record.strengthPct,
+      momentum: record.momentum,
+      streakCount: record.streakCount,
+      isGhost: record.isGhost,
+      isHidden: record.isHidden,
+      dismissedAt: record.dismissedAt?.toISOString() ?? null,
+      suggestionReason: record.suggestionReason,
+      discoveredAt: record.discoveredAt.toISOString(),
+    }));
+  }
+
+  async unhideParallel(
+    userId: string,
+    parallelId: string,
+  ): Promise<UserParallelDto> {
+    const parallelSelect = {
+      id: true,
+      strengthPct: true,
+      momentum: true,
+      streakCount: true,
+      isGhost: true,
+      isHidden: true,
+      dismissedAt: true,
+      suggestionReason: true,
+      discoveredAt: true,
+      parallelType: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          icon: true,
+        },
+      },
+    } as const;
+
+    const updateResult = await this.prisma.userParallel.updateMany({
+      where: {
+        id: parallelId,
+        userId,
+        dismissedAt: null,
+        isHidden: true,
+      },
+      data: {
+        isHidden: false,
+      },
+    });
+
+    const record = await this.prisma.userParallel.findFirst({
+      where: {
+        id: parallelId,
+        userId,
+        dismissedAt: null,
+        ...(updateResult.count === 0 ? { isHidden: false } : {}),
+      },
+      select: parallelSelect,
+    });
+
+    if (!record) {
+      throw new NotFoundException('Parallel not found');
+    }
+
+    return {
+      id: record.id,
+      parallelType: record.parallelType,
+      strengthPct: record.strengthPct,
+      momentum: record.momentum,
+      streakCount: record.streakCount,
+      isGhost: record.isGhost,
+      isHidden: record.isHidden,
+      dismissedAt: record.dismissedAt?.toISOString() ?? null,
+      suggestionReason: record.suggestionReason,
+      discoveredAt: record.discoveredAt.toISOString(),
+    };
+  }
+
+  async dismissParallel(userId: string, parallelId: string): Promise<void> {
+    // Soft-delete (dismissedAt = now()) rather than hard-delete so the unique
+    // (userId, parallelTypeId) record prevents the Identity Engine from ever
+    // re-suggesting a permanently rejected/removed Parallel (DATABASE.md §2.3).
+    const updateResult = await this.prisma.userParallel.updateMany({
+      where: {
+        id: parallelId,
+        userId,
+        dismissedAt: null,
+      },
+      data: {
+        dismissedAt: new Date(),
+      },
+    });
+
+    if (updateResult.count === 1) {
+      return;
+    }
+
+    // Idempotent for an already-dismissed Parallel owned by this caller;
+    // enumeration-safe 404 for nonexistent or non-owned IDs.
+    const existing = await this.prisma.userParallel.findFirst({
+      where: {
+        id: parallelId,
+        userId,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Parallel not found');
+    }
+  }
 }

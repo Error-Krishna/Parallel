@@ -448,4 +448,100 @@ describe('Parallels Ghost Mode & Visibility (e2e)', () => {
     expect(dbRow?.isGhost).toBe(false);
     expect(dbRow?.isHidden).toBe(true);
   });
+
+  it('lists hidden Parallels in /manage and restores them cleanly via POST /unhide without altering isGhost', async () => {
+    const toggleGhost = await createIsolatedGhostParallel(
+      userA.userId,
+      'Hide Unhide Roundtrip',
+    );
+
+    const hideRes = await request(getHttpServer(app))
+      .patch(`/v1/parallels/${toggleGhost.userParallelId}/hide`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(hideRes.status).toBe(200);
+
+    // Appears in /manage with isHidden: true and isGhost: true
+    const manageRes = await request(getHttpServer(app))
+      .get('/v1/parallels/manage')
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(manageRes.status).toBe(200);
+    const managedItem = (
+      manageRes.body as Array<{ id: string; isHidden: boolean; isGhost: boolean }>
+    ).find((p) => p.id === toggleGhost.userParallelId);
+    expect(managedItem).toMatchObject({ isHidden: true, isGhost: true });
+
+    // Non-owner cannot unhide -> 404
+    const nonOwnerUnhide = await request(getHttpServer(app))
+      .post(`/v1/parallels/${toggleGhost.userParallelId}/unhide`)
+      .set('Authorization', `Bearer ${userB.accessToken}`);
+    expect(nonOwnerUnhide.status).toBe(404);
+
+    // Owner unhides -> 200, restored to map, still Ghost
+    const unhideRes = await request(getHttpServer(app))
+      .post(`/v1/parallels/${toggleGhost.userParallelId}/unhide`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(unhideRes.status).toBe(200);
+    expect(unhideRes.body.isHidden).toBe(false);
+    expect(unhideRes.body.isGhost).toBe(true);
+
+    const mapAfterUnhide = await request(getHttpServer(app))
+      .get('/v1/parallels/map')
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(
+      (mapAfterUnhide.body.parallels as Array<{ id: string }>).some(
+        (p) => p.id === toggleGhost.userParallelId,
+      ),
+    ).toBe(true);
+  });
+
+  it('permanently soft-deletes a Parallel via DELETE /:parallelId and prevents publishing or unhiding afterward', async () => {
+    const removable = await createIsolatedGhostParallel(
+      userA.userId,
+      'Permanent Dismiss',
+    );
+
+    // Non-owner cannot dismiss -> 404
+    const nonOwnerDelete = await request(getHttpServer(app))
+      .delete(`/v1/parallels/${removable.userParallelId}`)
+      .set('Authorization', `Bearer ${userB.accessToken}`);
+    expect(nonOwnerDelete.status).toBe(404);
+
+    // Owner dismisses -> 204
+    const deleteRes = await request(getHttpServer(app))
+      .delete(`/v1/parallels/${removable.userParallelId}`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(deleteRes.status).toBe(204);
+
+    // Repeat DELETE is idempotent -> 204
+    const repeatDelete = await request(getHttpServer(app))
+      .delete(`/v1/parallels/${removable.userParallelId}`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(repeatDelete.status).toBe(204);
+
+    // Absent from /manage and /map, cannot be published or unhidden
+    const manageRes = await request(getHttpServer(app))
+      .get('/v1/parallels/manage')
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(
+      (manageRes.body as Array<{ id: string }>).some(
+        (p) => p.id === removable.userParallelId,
+      ),
+    ).toBe(false);
+
+    const publishAfterDismiss = await request(getHttpServer(app))
+      .post(`/v1/parallels/${removable.userParallelId}/make-public`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(publishAfterDismiss.status).toBe(404);
+
+    const unhideAfterDismiss = await request(getHttpServer(app))
+      .post(`/v1/parallels/${removable.userParallelId}/unhide`)
+      .set('Authorization', `Bearer ${userA.accessToken}`);
+    expect(unhideAfterDismiss.status).toBe(404);
+
+    // Soft-deleted row persists with dismissedAt set so Identity Engine won't re-suggest
+    const dbRow = await prisma.userParallel.findUnique({
+      where: { id: removable.userParallelId },
+    });
+    expect(dbRow?.dismissedAt).not.toBeNull();
+  });
 });

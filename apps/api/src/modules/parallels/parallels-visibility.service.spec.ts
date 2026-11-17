@@ -13,6 +13,7 @@ describe('ParallelsService — Ghost Mode visibility, atomicity & ownership', ()
   let prisma: {
     userParallel: {
       findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
@@ -44,6 +45,7 @@ describe('ParallelsService — Ghost Mode visibility, atomicity & ownership', ()
     prisma = {
       userParallel: {
         findFirst: vi.fn(),
+        findMany: vi.fn(),
         update: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -294,5 +296,86 @@ describe('ParallelsService — Ghost Mode visibility, atomicity & ownership', ()
 
     expect(result.id).toBe('up-ctrl');
     expect(result.isGhost).toBe(false);
+  });
+
+  it('listManageableParallels returns all non-dismissed Parallels including Ghost and Hidden', async () => {
+    prisma.userParallel.findMany.mockResolvedValue([
+      buildRow({ id: 'up-public', isGhost: false, isHidden: false }),
+      buildRow({ id: 'up-ghost', isGhost: true, isHidden: false }),
+      buildRow({ id: 'up-hidden', isGhost: false, isHidden: true }),
+    ]);
+
+    const result = await service.listManageableParallels('user-owner');
+
+    expect(prisma.userParallel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 'user-owner', dismissedAt: null },
+      }),
+    );
+    expect(result.map((item) => item.id)).toEqual([
+      'up-public',
+      'up-ghost',
+      'up-hidden',
+    ]);
+  });
+
+  it('unhideParallel atomically restores a hidden Parallel without altering isGhost', async () => {
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 1 });
+    prisma.userParallel.findFirst.mockResolvedValue(
+      buildRow({ id: 'up-hidden-ghost', isGhost: true, isHidden: false }),
+    );
+
+    const result = await service.unhideParallel('user-owner', 'up-hidden-ghost');
+
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-hidden-ghost',
+        userId: 'user-owner',
+        dismissedAt: null,
+        isHidden: true,
+      },
+      data: { isHidden: false },
+    });
+    expect(result.isHidden).toBe(false);
+    expect(result.isGhost).toBe(true);
+  });
+
+  it('unhideParallel returns NotFoundException (404) for non-owner or dismissed records', async () => {
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 0 });
+    prisma.userParallel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.unhideParallel('user-attacker', 'up-victim'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('dismissParallel sets dismissedAt atomically and is idempotent for already-dismissed owner records', async () => {
+    prisma.userParallel.updateMany.mockResolvedValueOnce({ count: 1 });
+    await service.dismissParallel('user-owner', 'up-dismiss-1');
+
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-dismiss-1',
+        userId: 'user-owner',
+        dismissedAt: null,
+      },
+      data: {
+        dismissedAt: expect.any(Date),
+      },
+    });
+
+    // Repeat call: count === 0, owner record exists -> idempotent void
+    prisma.userParallel.updateMany.mockResolvedValueOnce({ count: 0 });
+    prisma.userParallel.findFirst.mockResolvedValueOnce({ id: 'up-dismiss-1' });
+    await expect(
+      service.dismissParallel('user-owner', 'up-dismiss-1'),
+    ).resolves.toBeUndefined();
+
+    // Non-owner: count === 0, owner record does not exist -> 404
+    prisma.userParallel.updateMany.mockResolvedValueOnce({ count: 0 });
+    prisma.userParallel.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.dismissParallel('user-attacker', 'up-dismiss-1'),
+    ).rejects.toThrow(NotFoundException);
   });
 });

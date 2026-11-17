@@ -233,6 +233,24 @@ export function createParallelApi(http: AxiosInstance) {
         );
         return data;
       },
+
+      listManageable: async (): Promise<UserParallelDto[]> => {
+        const { data } = await http.get<UserParallelDto[]>(
+          '/v1/parallels/manage',
+        );
+        return data;
+      },
+
+      unhide: async (parallelId: string): Promise<UserParallelDto> => {
+        const { data } = await http.post<UserParallelDto>(
+          `/v1/parallels/${parallelId}/unhide`,
+        );
+        return data;
+      },
+
+      dismiss: async (parallelId: string): Promise<void> => {
+        await http.delete(`/v1/parallels/${parallelId}`);
+      },
     },
     onboarding: {
       getQuestions: async (): Promise<OnboardingQuestion[]> => {
