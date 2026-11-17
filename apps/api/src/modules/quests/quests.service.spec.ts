@@ -310,4 +310,36 @@ describe('QuestsService', () => {
     expect(prisma.userQuestProgress.update).not.toHaveBeenCalled();
     expect(prisma.interestSignal.create).not.toHaveBeenCalled();
   });
+
+  it('returns a single quest by ID with default NOT_STARTED progress', async () => {
+    prisma.quest.findUnique.mockResolvedValue({
+      id: 'quest-42',
+      parallelTypeId: 'parallel-1',
+      title: 'Weekend Prototype Sprint',
+      description: 'Ship one rough artifact in 48 hours.',
+      steps: [{ title: 'Sketch', description: 'Draw a quick wireframe.' }],
+      rewardType: 'BADGE',
+      rewardValue: 'weekend-shipper',
+      season: 'Season 1',
+      progress: [],
+    });
+
+    const result = await service.getQuestById('user-1', 'quest-42');
+
+    expect(result.id).toBe('quest-42');
+    expect(result.progress).toEqual({
+      status: 'NOT_STARTED',
+      currentStep: 0,
+      startedAt: null,
+      completedAt: null,
+    });
+  });
+
+  it('throws NotFoundException when getQuestById cannot find the quest', async () => {
+    prisma.quest.findUnique.mockResolvedValue(null);
+
+    await expect(service.getQuestById('user-1', 'missing-quest')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
 });

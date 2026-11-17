@@ -196,6 +196,11 @@ export function createParallelApi(http: AxiosInstance) {
         return data;
       },
 
+      getQuest: async (questId: string): Promise<QuestDto> => {
+        const { data } = await http.get<QuestDto>(`/v1/quests/${questId}`);
+        return data;
+      },
+
       startQuest: async (questId: string): Promise<QuestDto['progress']> => {
         const { data } = await http.post<QuestDto['progress']>(
           `/v1/quests/${questId}/start`,

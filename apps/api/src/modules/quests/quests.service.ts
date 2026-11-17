@@ -58,6 +58,44 @@ export class QuestsService {
       },
     }));
   }
+
+  async getQuestById(userId: string, questId: string) {
+    const quest = await this.prisma.quest.findUnique({
+      where: { id: questId },
+      include: {
+        progress: {
+          where: { userId },
+          select: {
+            status: true,
+            currentStep: true,
+            startedAt: true,
+            completedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!quest) {
+      throw new NotFoundException('Quest not found');
+    }
+
+    return {
+      id: quest.id,
+      parallelTypeId: quest.parallelTypeId,
+      title: quest.title,
+      description: quest.description,
+      steps: quest.steps,
+      rewardType: quest.rewardType,
+      rewardValue: quest.rewardValue,
+      season: quest.season,
+      progress: quest.progress[0] ?? {
+        status: 'NOT_STARTED',
+        currentStep: 0,
+        startedAt: null,
+        completedAt: null,
+      },
+    };
+  }
   async completeStep(userId: string, questId: string) {
     const quest = await this.prisma.quest.findUnique({
       where: { id: questId },
