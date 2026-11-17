@@ -5,6 +5,7 @@
 // see apps/web/CLAUDE.md for the Server vs. Client Component convention.
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthRouteGuard } from '@/features/auth/route-guard';
 
 export function Providers({ children }: { children: ReactNode }) {
   // Created once per component instance (not per render) via useState, and scoped
@@ -22,5 +23,9 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthRouteGuard>{children}</AuthRouteGuard>
+    </QueryClientProvider>
+  );
 }

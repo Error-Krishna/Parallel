@@ -87,4 +87,38 @@ describe('apiClient response interceptor', () => {
       'email must be an email password is too short',
     );
   });
+
+  it('clears auth state on 401 responses from protected endpoints', async () => {
+    const clearAuth = vi.fn();
+    getState.mockReturnValue({ accessToken: 'expired-token', clearAuth });
+
+    const { apiClient } = await import('@/lib/api-client');
+    const rejected = apiClient.interceptors.response.handlers?.[0]?.rejected;
+
+    const axiosError = {
+      isAxiosError: true,
+      config: { url: '/v1/parallels/map' },
+      response: { status: 401, data: { message: 'Token has expired' } },
+    };
+
+    await expect(rejected!(axiosError)).rejects.toThrow('Token has expired');
+    expect(clearAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call clearAuth on 401 from /v1/auth/login', async () => {
+    const clearAuth = vi.fn();
+    getState.mockReturnValue({ accessToken: 'existing-token', clearAuth });
+
+    const { apiClient } = await import('@/lib/api-client');
+    const rejected = apiClient.interceptors.response.handlers?.[0]?.rejected;
+
+    const axiosError = {
+      isAxiosError: true,
+      config: { url: '/v1/auth/login' },
+      response: { status: 401, data: { message: 'Invalid email or password' } },
+    };
+
+    await expect(rejected!(axiosError)).rejects.toThrow('Invalid email or password');
+    expect(clearAuth).not.toHaveBeenCalled();
+  });
 });

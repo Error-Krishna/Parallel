@@ -28,6 +28,20 @@ apiClient.interceptors.response.use(
     // out here once, so every page (signup, login, everything after) gets it for free
     // instead of each one re-parsing error.response.data itself.
     if (axios.isAxiosError(error)) {
+      const requestUrl = error.config?.url ?? '';
+      const isPublicAuthAttempt =
+        requestUrl.includes('/v1/auth/login') ||
+        requestUrl.includes('/v1/auth/signup');
+
+      // When an authenticated session receives 401 (expired/revoked JWT), clear local
+      // auth state so AuthRouteGuard silently redirects to /login (USER_FLOW.md §1).
+      if (error.response?.status === 401 && !isPublicAuthAttempt) {
+        const authState = useAuthStore.getState();
+        if (authState.accessToken && typeof authState.clearAuth === 'function') {
+          authState.clearAuth();
+        }
+      }
+
       const body = error.response?.data as { message?: string | string[] } | undefined;
       if (body?.message) {
         const message = Array.isArray(body.message) ? body.message.join(' ') : body.message;
