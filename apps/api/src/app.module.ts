@@ -22,6 +22,7 @@ import { IdentityEngineModule } from './modules/identity-engine/identity-engine.
 import { ParallelsModule } from './modules/parallels/parallels.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { CardsModule } from './modules/cards/cards.module.js';
+import { WrappedModule } from './modules/wrapped/wrapped.module.js';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { CardsModule } from './modules/cards/cards.module.js';
     QuestsModule,
     NotificationsModule,
     CardsModule,
+    WrappedModule,
     // Feature modules land here as they're built (blueprint §16):
     // FeedModule, SocialModule, CommunitiesModule, EventsModule, WrappedModule,
     // CardsModule, NotificationsModule, AdminModule.

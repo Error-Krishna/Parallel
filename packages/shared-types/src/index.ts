@@ -186,6 +186,8 @@ export interface WrappedRecapDto {
   periodEnd: string;
   highlights: WrappedHighlights;
   createdAt: string;
+  username?: string;
+  parallelNames?: Record<string, string>;
 }
 
 export interface CommunityDto {

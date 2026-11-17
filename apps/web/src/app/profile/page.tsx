@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Download, LogOut, Pencil, Shield, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, LogOut, Pencil, Shield, Sparkles, Trash2 } from 'lucide-react';
 import type { PublicUser, UserParallelDto } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/features/auth/auth-store';
@@ -33,6 +33,8 @@ export default function ProfilePage() {
 
   const [exporting, setExporting] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [generatingWrapped, setGeneratingWrapped] = useState(false);
+  const [wrappedError, setWrappedError] = useState<string | null>(null);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -342,6 +344,52 @@ export default function ProfilePage() {
           </p>
 
           <MyParallelsManager parallels={parallels} onChange={setParallels} />
+        </section>
+
+        <section className="mt-14 max-w-2xl">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Parallel Wrapped
+              </p>
+            </div>
+            <h2 className="mt-2 text-lg font-semibold">
+              See how your Parallels evolved.
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Generate a shareable story recap from your public Parallels,
+              streaks, and curiosity moments. Private Ghost Parallels are never
+              included.
+            </p>
+            {wrappedError && (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {wrappedError}
+              </p>
+            )}
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Button
+                disabled={generatingWrapped}
+                onClick={async () => {
+                  setGeneratingWrapped(true);
+                  setWrappedError(null);
+                  try {
+                    const recap = await api.wrapped.generate('MONTHLY');
+                    router.push(`/wrapped/${recap.id}`);
+                  } catch {
+                    setWrappedError(
+                      'Could not generate your Parallel Wrapped right now.',
+                    );
+                  } finally {
+                    setGeneratingWrapped(false);
+                  }
+                }}
+              >
+                <Sparkles />
+                {generatingWrapped ? 'Generating...' : 'Generate Monthly Wrapped'}
+              </Button>
+            </div>
+          </div>
         </section>
 
         <section className="mt-14 max-w-2xl">

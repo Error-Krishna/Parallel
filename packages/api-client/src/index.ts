@@ -25,6 +25,7 @@ import type {
   QuestCompletionDto,
   QuestDto,
   SignupDto,
+  WrappedPeriod,
   WrappedRecapDto,
   TwinMatchDto,
   UserVisibleParallelDto,
@@ -333,6 +334,13 @@ export function createParallelApi(http: AxiosInstance) {
       },
     },
     wrapped: {
+      generate: async (period?: WrappedPeriod): Promise<WrappedRecapDto> => {
+        const { data } = await http.post<WrappedRecapDto>(
+          '/v1/wrapped/generate',
+          period ? { period } : {},
+        );
+        return data;
+      },
       get: async (id: string): Promise<WrappedRecapDto> => {
         const { data } = await http.get<WrappedRecapDto>(`/v1/wrapped/${id}`);
         return data;
