@@ -89,7 +89,7 @@ describe('IdentityEngineService', () => {
         strengthPct: 40,
         momentum: 0,
         streakCount: 0,
-        isGhost: true,
+        isGhost: false,
         isHidden: false,
         dismissedAt: null,
         suggestionReason: 'Based on your onboarding choices.',
@@ -106,6 +106,15 @@ describe('IdentityEngineService', () => {
     expect(result.user).not.toHaveProperty('email');
     expect(prisma.parallelType.upsert).toHaveBeenCalledTimes(4);
     expect(prisma.userParallel.upsert).toHaveBeenCalledTimes(4);
+
+    for (const [callArg] of prisma.userParallel.upsert.mock.calls) {
+      expect(callArg.create).toMatchObject({
+        userId: 'u1',
+        isGhost: false,
+        isHidden: false,
+      });
+    }
+    expect(result.parallels[0].isGhost).toBe(false);
   });
 
   it('does not re-run scoring for a user who already has a Parallel map', async () => {

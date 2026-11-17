@@ -147,7 +147,10 @@ export class IdentityEngineService {
             parallelTypeId: type.id,
             strengthPct,
             momentum: 0,
-            isGhost: true,
+            // Starter Parallels generated from onboarding are public so profiles,
+            // people discovery, twins, and collabs work immediately. Newly emerging
+            // Parallels (EmergingParallelService) still default to Ghost Mode (isGhost: true).
+            isGhost: false,
             isHidden: false,
             suggestionReason:
               'Based on your onboarding choices.',
