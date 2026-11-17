@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Bookmark, EyeOff, Globe, Heart, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, EyeOff, Globe, Heart, Share2, UserPlus } from 'lucide-react';
 import type {
   ContentItemDto,
   ParallelMapResponse,
@@ -51,6 +51,8 @@ export default function ParallelDetailPage() {
   const [publishingGhost, setPublishingGhost] = useState(false);
   const [publishGhostError, setPublishGhostError] = useState<string | null>(null);
   const [publishedGhostNotice, setPublishedGhostNotice] = useState(false);
+  const [creatingCard, setCreatingCard] = useState(false);
+  const [createCardError, setCreateCardError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>('feed');
   const [quests, setQuests] = useState<QuestDto[] | null>(null);
@@ -465,6 +467,43 @@ export default function ParallelDetailPage() {
                   {publishingGhost ? 'Publishing...' : 'Make public'}
                 </button>
               </div>
+            )}
+
+            {currentParallel && !currentParallel.isGhost && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={creatingCard}
+                  onClick={async () => {
+                    if (creatingCard) return;
+                    setCreatingCard(true);
+                    setCreateCardError(null);
+                    try {
+                      const created = await api.cards.create({
+                        cardType: 'PARALLEL',
+                        sourceId: currentParallel.id,
+                      });
+                      router.push(`/card/${created.id}`);
+                    } catch {
+                      setCreateCardError(
+                        'Could not create Identity Card right now.',
+                      );
+                    } finally {
+                      setCreatingCard(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {creatingCard ? 'Creating card...' : 'Share Identity Card'}
+                </button>
+              </div>
+            )}
+
+            {createCardError && (
+              <p role="alert" className="mb-2 text-xs text-destructive">
+                {createCardError}
+              </p>
             )}
 
             {publishedGhostNotice && !currentParallel?.isGhost && (

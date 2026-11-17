@@ -6,6 +6,7 @@ import type {
   ApiResponse,
   AuthResult,
   CreateIdentityCardDto,
+  CreateIdentityCardResponse,
   HealthResponse,
   IdentityCardDto,
   LoginDto,
@@ -313,12 +314,21 @@ export function createParallelApi(http: AxiosInstance) {
       },
     },
     cards: {
-      create: async (dto: CreateIdentityCardDto): Promise<{ jobId: string }> => {
-        const { data } = await http.post<{ jobId: string }>('/v1/cards', dto);
+      create: async (
+        dto: CreateIdentityCardDto,
+      ): Promise<CreateIdentityCardResponse> => {
+        const { data } = await http.post<CreateIdentityCardResponse>(
+          '/v1/cards',
+          dto,
+        );
         return data;
       },
       get: async (id: string): Promise<IdentityCardDto> => {
         const { data } = await http.get<IdentityCardDto>(`/v1/cards/${id}`);
+        return data;
+      },
+      listMine: async (): Promise<IdentityCardDto[]> => {
+        const { data } = await http.get<IdentityCardDto[]>('/v1/cards/me');
         return data;
       },
     },

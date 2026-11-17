@@ -134,6 +134,15 @@ export interface OnboardingQuestion {
 // Matches IdentityCardType in schema.prisma — keep in sync.
 export type IdentityCardType = 'PARALLEL' | 'QUEST' | 'WRAPPED' | 'TWIN' | 'COLLAB';
 
+export interface IdentityCardMetadataDto {
+  username: string;
+  title: string;
+  subtitle: string;
+  eyebrow: string;
+  accentHex: string;
+  stats: Array<{ label: string; value: string }>;
+}
+
 export interface IdentityCardDto {
   id: string;
   cardType: IdentityCardType;
@@ -141,6 +150,13 @@ export interface IdentityCardDto {
   sourceId: string | null;
   imageUrl: string;
   createdAt: string;
+  metadata?: IdentityCardMetadataDto;
+}
+
+export interface CreateIdentityCardResponse {
+  id: string;
+  jobId: string;
+  card: IdentityCardDto;
 }
 
 export interface CreateIdentityCardDto {
