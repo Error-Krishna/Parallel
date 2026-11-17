@@ -594,8 +594,8 @@ export class UsersService {
     ] = await Promise.all([
       this.prisma.onboardingResponse.findMany({
         where: { userId },
-        select: { questionKey: true, answerValue: true, answeredAt: true },
-        orderBy: { answeredAt: 'asc' },
+        select: { questionKey: true, answerValue: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
       this.prisma.userParallel.findMany({
         where: { userId },
