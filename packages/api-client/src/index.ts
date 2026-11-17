@@ -19,6 +19,7 @@ import type {
   ParallelMapResponse,
   PublicUser,
   ParallelTypeDto,
+  UserParallelDto,
   QuestCompletionDto,
   QuestDto,
   SignupDto,
@@ -224,6 +225,13 @@ export function createParallelApi(http: AxiosInstance) {
 
       hide: async (parallelId: string): Promise<void> => {
         await http.patch(`/v1/parallels/${parallelId}/hide`);
+      },
+
+      makePublic: async (parallelId: string): Promise<UserParallelDto> => {
+        const { data } = await http.post<UserParallelDto>(
+          `/v1/parallels/${parallelId}/make-public`,
+        );
+        return data;
       },
     },
     onboarding: {

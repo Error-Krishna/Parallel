@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { SignalType } from '@prisma/client';
 import type {
   ContentItemDto,
@@ -7,6 +11,7 @@ import type {
   ParallelFeedResponse,
   ParallelMapResponse,
   ParallelTypeDto,
+  UserParallelDto,
 } from '@parallel/shared-types';
 import { PrismaService } from '../../database/prisma.service.js';
 import { IdentityEngineService } from '../identity-engine/identity-engine.service.js';
@@ -333,5 +338,75 @@ export class ParallelsService {
     });
 
     return parallel;
+  }
+
+  async makeParallelPublic(
+    userId: string,
+    parallelId: string,
+  ): Promise<UserParallelDto> {
+    const parallelSelect = {
+      id: true,
+      userId: true,
+      strengthPct: true,
+      momentum: true,
+      streakCount: true,
+      isGhost: true,
+      isHidden: true,
+      dismissedAt: true,
+      suggestionReason: true,
+      discoveredAt: true,
+      parallelType: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          icon: true,
+        },
+      },
+    } as const;
+
+    // Accept the UserParallel primary ID (same identifier convention as hideParallel).
+    // Filtering dismissedAt: null prevents permanently dismissed Parallels from being published.
+    const existing = await this.prisma.userParallel.findFirst({
+      where: {
+        id: parallelId,
+        dismissedAt: null,
+      },
+      select: parallelSelect,
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Parallel not found');
+    }
+
+    // Explicit ownership guard so a user can never publish another user's Ghost Parallel
+    // by supplying a valid UserParallel ID.
+    if (existing.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to publish this Parallel',
+      );
+    }
+
+    // Idempotent: if already public, return the current DTO without a redundant DB write.
+    const record = existing.isGhost
+      ? await this.prisma.userParallel.update({
+          where: { id: existing.id },
+          data: { isGhost: false },
+          select: parallelSelect,
+        })
+      : existing;
+
+    return {
+      id: record.id,
+      parallelType: record.parallelType,
+      strengthPct: record.strengthPct,
+      momentum: record.momentum,
+      streakCount: record.streakCount,
+      isGhost: record.isGhost,
+      isHidden: record.isHidden,
+      dismissedAt: record.dismissedAt?.toISOString() ?? null,
+      suggestionReason: record.suggestionReason,
+      discoveredAt: record.discoveredAt.toISOString(),
+    };
   }
 }
