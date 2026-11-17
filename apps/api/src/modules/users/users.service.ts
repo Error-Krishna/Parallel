@@ -554,4 +554,186 @@ export class UsersService {
       .sort()
       .map((key) => key.split('::') as [string, string]);
   }
+
+  /**
+   * Self-serve personal data export (Blueprint §18 / USER_FLOW.md Flow 14).
+   * Explicitly omits passwordHash and internal vector columns.
+   */
+  async exportUserData(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        avatarUrl: true,
+        bio: true,
+        visibilitySettings: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [
+      onboardingResponses,
+      parallels,
+      evolutionSnapshots,
+      interestSignals,
+      questProgress,
+      questRewards,
+      communityMemberships,
+      following,
+      followers,
+      notifications,
+      wrappedRecaps,
+      identityCards,
+    ] = await Promise.all([
+      this.prisma.onboardingResponse.findMany({
+        where: { userId },
+        select: { questionKey: true, answerValue: true, answeredAt: true },
+        orderBy: { answeredAt: 'asc' },
+      }),
+      this.prisma.userParallel.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          strengthPct: true,
+          momentum: true,
+          streakCount: true,
+          streakLastTouchedAt: true,
+          isGhost: true,
+          isHidden: true,
+          dismissedAt: true,
+          suggestionReason: true,
+          discoveredAt: true,
+          parallelType: {
+            select: { id: true, name: true, description: true, icon: true },
+          },
+        },
+        orderBy: { discoveredAt: 'asc' },
+      }),
+      this.prisma.parallelEvolutionSnapshot.findMany({
+        where: { userId },
+        select: { parallelTypeId: true, strengthPct: true, capturedAt: true },
+        orderBy: { capturedAt: 'asc' },
+      }),
+      this.prisma.interestSignal.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          signalType: true,
+          targetType: true,
+          targetId: true,
+          weight: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1000,
+      }),
+      this.prisma.userQuestProgress.findMany({
+        where: { userId },
+        select: {
+          questId: true,
+          status: true,
+          currentStep: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      }),
+      this.prisma.userQuestReward.findMany({
+        where: { userId },
+        select: {
+          questId: true,
+          rewardType: true,
+          rewardValue: true,
+          grantedAt: true,
+        },
+      }),
+      this.prisma.communityMember.findMany({
+        where: { userId },
+        select: {
+          communityId: true,
+          joinedAt: true,
+          community: { select: { name: true, description: true } },
+        },
+      }),
+      this.prisma.follow.findMany({
+        where: { followerId: userId },
+        select: { followeeId: true, createdAt: true },
+      }),
+      this.prisma.follow.findMany({
+        where: { followeeId: userId },
+        select: { followerId: true, createdAt: true },
+      }),
+      this.prisma.notification.findMany({
+        where: { userId },
+        select: { id: true, type: true, payload: true, readAt: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      this.prisma.parallelWrapped.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          period: true,
+          periodStart: true,
+          periodEnd: true,
+          highlights: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.identityCard.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          cardType: true,
+          sourceType: true,
+          sourceId: true,
+          imageUrl: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      exportedAt: new Date().toISOString(),
+      user,
+      onboardingResponses,
+      parallels,
+      evolutionSnapshots,
+      interestSignals,
+      questProgress,
+      questRewards,
+      communityMemberships,
+      following,
+      followers,
+      notifications,
+      wrappedRecaps,
+      identityCards,
+    };
+  }
+
+  /**
+   * Irreversible self-serve account deletion (Blueprint §18 / USER_FLOW.md Flow 14).
+   * Prisma schema defines onDelete: Cascade on all User relations.
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    try {
+      await this.prisma.user.delete({
+        where: { id: userId },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('User not found');
+      }
+      throw error;
+    }
+  }
 }

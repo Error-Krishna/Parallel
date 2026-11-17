@@ -114,6 +114,17 @@ export function createParallelApi(http: AxiosInstance) {
       unfollow: async (userId: string): Promise<void> => {
         await http.post(`/v1/users/${userId}/unfollow`);
       },
+
+      exportData: async (): Promise<Record<string, unknown>> => {
+        const { data } = await http.get<ApiResponse<Record<string, unknown>>>(
+          '/v1/users/me/export',
+        );
+        return data.data;
+      },
+
+      deleteMe: async (): Promise<void> => {
+        await http.delete('/v1/users/me');
+      },
     },
 
     health: {

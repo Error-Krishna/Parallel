@@ -1,13 +1,18 @@
 import {
   Body,
   Controller,
-  Post,
+  Delete,
   Get,
   HttpStatus,
+  Inject,
+  Optional,
   Param,
   Patch,
+  Post,
   UseGuards,
 } from '@nestjs/common';
+import type { Redis } from 'ioredis';
+import { REDIS_CLIENT } from '../../jobs/redis.provider.js';
 import { UsersService } from './users.service.js';
 import { apiResponse } from '../../common/utils/api-response.js';
 import { apiError } from '../../common/utils/api-error.js';
@@ -21,7 +26,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis,
+  ) {}
 
   @Get('me')
   async getMe(@CurrentUser() currentUser: AuthenticatedUser) {
@@ -31,6 +39,35 @@ export class UsersController {
       this.usersService.toPublicUser(user),
       'User profile fetched successfully',
     );
+  }
+
+  @Get('me/export')
+  async exportMe(@CurrentUser() currentUser: AuthenticatedUser) {
+    const exported = await this.usersService.exportUserData(currentUser.id);
+
+    return apiResponse(exported, 'User data exported successfully');
+  }
+
+  @Delete('me')
+  async deleteMe(@CurrentUser() currentUser: AuthenticatedUser) {
+    await this.usersService.deleteAccount(currentUser.id);
+
+    // Immediately revoke the active JWT in Redis so the deleted account's token
+    // cannot be reused for any remaining TTL window (USER_FLOW.md Flow 14).
+    if (this.redis && currentUser.jti) {
+      const remainingSeconds = Math.max(
+        1,
+        currentUser.exp - Math.floor(Date.now() / 1000),
+      );
+      await this.redis.set(
+        `auth:revoked:${currentUser.jti}`,
+        '1',
+        'EX',
+        remainingSeconds,
+      );
+    }
+
+    return apiResponse(null, 'Account deleted successfully');
   }
 
   @Patch('me')
