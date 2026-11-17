@@ -5,20 +5,20 @@ describe('TwinsProcessor', () => {
   let processor: TwinsProcessor;
   let usersService: {
     saveTwinMatch: ReturnType<typeof vi.fn>;
-    getTwinCandidateUserIds: ReturnType<typeof vi.fn>;
+    getTwinCandidatePairs: ReturnType<typeof vi.fn>;
   };
   let twinsQueue: {
-    add: ReturnType<typeof vi.fn>;
+    addBulk: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     usersService = {
       saveTwinMatch: vi.fn(),
-      getTwinCandidateUserIds: vi.fn(),
+      getTwinCandidatePairs: vi.fn(),
     };
 
     twinsQueue = {
-      add: vi.fn(),
+      addBulk: vi.fn(),
     };
 
     processor = new TwinsProcessor(
@@ -41,58 +41,50 @@ describe('TwinsProcessor', () => {
       'user-a',
       'user-b',
     );
-    expect(usersService.getTwinCandidateUserIds).not.toHaveBeenCalled();
-    expect(twinsQueue.add).not.toHaveBeenCalled();
+    expect(usersService.getTwinCandidatePairs).not.toHaveBeenCalled();
+    expect(twinsQueue.addBulk).not.toHaveBeenCalled();
   });
 
-  it('queues every unique pair during a refresh', async () => {
-    usersService.getTwinCandidateUserIds.mockResolvedValue([
-      'user-a',
-      'user-b',
-      'user-c',
+  it('queues pruned candidate pairs in bulk with deduplicated jobIds', async () => {
+    usersService.getTwinCandidatePairs.mockResolvedValue([
+      ['user-a', 'user-b'],
+      ['user-a', 'user-c'],
     ]);
 
     await processor.process({
       data: {},
     } as never);
 
-    expect(twinsQueue.add).toHaveBeenCalledTimes(3);
-
-    expect(twinsQueue.add).toHaveBeenNthCalledWith(
-      1,
-      'calculate-twin',
+    expect(twinsQueue.addBulk).toHaveBeenCalledTimes(1);
+    expect(twinsQueue.addBulk).toHaveBeenCalledWith([
       {
-        userAId: 'user-a',
-        userBId: 'user-b',
+        name: 'calculate-twin',
+        data: { userAId: 'user-a', userBId: 'user-b' },
+        opts: {
+          jobId: 'calculate-twin-user-a-user-b',
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
       },
-    );
-
-    expect(twinsQueue.add).toHaveBeenNthCalledWith(
-      2,
-      'calculate-twin',
       {
-        userAId: 'user-a',
-        userBId: 'user-c',
+        name: 'calculate-twin',
+        data: { userAId: 'user-a', userBId: 'user-c' },
+        opts: {
+          jobId: 'calculate-twin-user-a-user-c',
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
       },
-    );
-
-    expect(twinsQueue.add).toHaveBeenNthCalledWith(
-      3,
-      'calculate-twin',
-      {
-        userAId: 'user-b',
-        userBId: 'user-c',
-      },
-    );
+    ]);
   });
 
-  it('queues no pairs when fewer than two users are eligible', async () => {
-    usersService.getTwinCandidateUserIds.mockResolvedValue(['user-a']);
+  it('queues no jobs when no pruned candidate pairs qualify', async () => {
+    usersService.getTwinCandidatePairs.mockResolvedValue([]);
 
     await processor.process({
       data: {},
     } as never);
 
-    expect(twinsQueue.add).not.toHaveBeenCalled();
+    expect(twinsQueue.addBulk).not.toHaveBeenCalled();
   });
 });

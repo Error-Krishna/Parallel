@@ -484,4 +484,74 @@ export class UsersService {
       bio: user.bio,
     };
   }
+
+  /**
+   * Builds candidate Twin pairs via an inverted index on visible Parallels so the
+   * scheduled TwinsProcessor only evaluates pairs sharing >= minSharedParallels
+   * (plus existing persisted Twin pairs so diverged matches are pruned), avoiding
+   * an unbounded O(N^2) global user cross-product.
+   */
+  async getTwinCandidatePairs(
+    minSharedParallels = 2,
+  ): Promise<Array<[string, string]>> {
+    const [visibleParallels, existingTwins] = await Promise.all([
+      this.prisma.userParallel.findMany({
+        where: {
+          isGhost: false,
+          isHidden: false,
+          dismissedAt: null,
+        },
+        select: {
+          userId: true,
+          parallelTypeId: true,
+        },
+      }),
+      this.prisma.twin.findMany({
+        select: {
+          userAId: true,
+          userBId: true,
+        },
+      }),
+    ]);
+
+    // Inverted index: parallelTypeId -> unique users exploring it visibly
+    const usersByParallel = new Map<string, string[]>();
+    for (const row of visibleParallels) {
+      const bucket = usersByParallel.get(row.parallelTypeId);
+      if (bucket) {
+        bucket.push(row.userId);
+      } else {
+        usersByParallel.set(row.parallelTypeId, [row.userId]);
+      }
+    }
+
+    const sharedCounts = new Map<string, number>();
+    for (const userIds of usersByParallel.values()) {
+      const uniqueSorted = [...new Set(userIds)].sort();
+      for (let i = 0; i < uniqueSorted.length; i += 1) {
+        for (let j = i + 1; j < uniqueSorted.length; j += 1) {
+          const key = `${uniqueSorted[i]}::${uniqueSorted[j]}`;
+          sharedCounts.set(key, (sharedCounts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    const candidateKeys = new Set<string>();
+    for (const [key, count] of sharedCounts.entries()) {
+      if (count >= minSharedParallels) {
+        candidateKeys.add(key);
+      }
+    }
+
+    // Keep existing persisted Twins in the candidate set so diverged pairs can be
+    // re-scored and cleaned up if their overlap drops below threshold.
+    for (const twin of existingTwins) {
+      const [uA, uB] = [twin.userAId, twin.userBId].sort();
+      candidateKeys.add(`${uA}::${uB}`);
+    }
+
+    return [...candidateKeys]
+      .sort()
+      .map((key) => key.split('::') as [string, string]);
+  }
 }

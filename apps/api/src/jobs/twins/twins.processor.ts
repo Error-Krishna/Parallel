@@ -1,8 +1,4 @@
-import {
-  InjectQueue,
-  Processor,
-  WorkerHost,
-} from '@nestjs/bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
 import { UsersService } from '../../modules/users/users.service.js';
@@ -11,6 +7,8 @@ interface TwinJobData {
   userAId?: string;
   userBId?: string;
 }
+
+const TWIN_BULK_BATCH_SIZE = 500;
 
 @Injectable()
 @Processor('twins')
@@ -33,23 +31,29 @@ export class TwinsProcessor extends WorkerHost {
       return;
     }
 
-    const userIds = await this.usersService.getTwinCandidateUserIds();
+    const candidatePairs = await this.usersService.getTwinCandidatePairs();
 
-    let queuedPairs = 0;
-
-    for (let i = 0; i < userIds.length; i += 1) {
-      for (let j = i + 1; j < userIds.length; j += 1) {
-        await this.twinsQueue.add('calculate-twin', {
-          userAId: userIds[i],
-          userBId: userIds[j],
-        });
-
-        queuedPairs += 1;
-      }
+    if (candidatePairs.length === 0) {
+      this.logger.log('Queued 0 Twin pairs (no qualifying candidate pairs)');
+      return;
     }
 
-    this.logger.log(
-      `Queued ${queuedPairs} Twin pairs for ${userIds.length} users`,
-    );
+    for (let i = 0; i < candidatePairs.length; i += TWIN_BULK_BATCH_SIZE) {
+      const batch = candidatePairs.slice(i, i + TWIN_BULK_BATCH_SIZE);
+      await this.twinsQueue.addBulk(
+        batch.map(([userAId, userBId]) => ({
+          name: 'calculate-twin',
+          data: { userAId, userBId },
+          opts: {
+            // Deterministic jobId deduplicates overlapping scheduled runs.
+            jobId: `calculate-twin-${userAId}-${userBId}`,
+            removeOnComplete: true,
+            removeOnFail: 100,
+          },
+        })),
+      );
+    }
+
+    this.logger.log(`Queued ${candidatePairs.length} pruned Twin pairs`);
   }
 }
