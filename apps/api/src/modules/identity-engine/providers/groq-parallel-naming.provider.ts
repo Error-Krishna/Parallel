@@ -14,7 +14,8 @@ export class GroqParallelNamingProvider
   private readonly client: Groq | null;
 
   constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get<string>('groqApiKey');
+    // configuration.ts nests all env settings under the `app` namespace.
+    const apiKey = this.configService.get<string>('app.groqApiKey')?.trim();
 
     this.client = apiKey
       ? new Groq({ apiKey })
