@@ -153,6 +153,7 @@ model UserParallel {
 
   @@unique([userId, parallelTypeId])
   @@index([userId])
+  @@index([parallelTypeId])
   @@map("user_parallels")
 }
 
@@ -271,6 +272,7 @@ model Follow {
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@id([followerId, followeeId])
+  @@index([followeeId])
   @@map("follows")
 }
 
@@ -291,6 +293,7 @@ model Twin {
   computedAt            DateTime @default(now()) @map("computed_at")
 
   @@unique([userAId, userBId])
+  @@index([userBId])
   @@map("parallel_twins")
 }
 
@@ -316,6 +319,7 @@ model CommunityMember {
   joinedAt    DateTime  @default(now()) @map("joined_at")
 
   @@id([communityId, userId])
+  @@index([userId])
   @@map("community_members")
 }
 
