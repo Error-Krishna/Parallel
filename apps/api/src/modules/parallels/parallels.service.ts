@@ -1,8 +1,4 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { SignalType } from '@prisma/client';
 import type {
   ContentItemDto,
@@ -346,7 +342,6 @@ export class ParallelsService {
   ): Promise<UserParallelDto> {
     const parallelSelect = {
       id: true,
-      userId: true,
       strengthPct: true,
       momentum: true,
       streakCount: true,
@@ -365,36 +360,39 @@ export class ParallelsService {
       },
     } as const;
 
-    // Accept the UserParallel primary ID (same identifier convention as hideParallel).
-    // Filtering dismissedAt: null prevents permanently dismissed Parallels from being published.
-    const existing = await this.prisma.userParallel.findFirst({
+    // Atomic conditional write at the DB boundary: enforces target ID, owner userId,
+    // non-dismissed state, and isGhost: true in one statement. Already-public records
+    // match 0 rows (no redundant write), and non-owned, missing, or concurrently
+    // dismissed records cannot be mutated.
+    const updateResult = await this.prisma.userParallel.updateMany({
       where: {
         id: parallelId,
+        userId,
         dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
+
+    // Scoped read: when updateResult.count === 1, fetch the newly published record;
+    // when updateResult.count === 0, distinguish an already-public record owned by
+    // the caller (idempotent 200) from a missing, dismissed, or non-owned record
+    // (404 Not Found — matching hideParallel() and avoiding Ghost existence probing).
+    const record = await this.prisma.userParallel.findFirst({
+      where: {
+        id: parallelId,
+        userId,
+        dismissedAt: null,
+        ...(updateResult.count === 0 ? { isGhost: false } : {}),
       },
       select: parallelSelect,
     });
 
-    if (!existing) {
+    if (!record) {
       throw new NotFoundException('Parallel not found');
     }
-
-    // Explicit ownership guard so a user can never publish another user's Ghost Parallel
-    // by supplying a valid UserParallel ID.
-    if (existing.userId !== userId) {
-      throw new ForbiddenException(
-        'You do not have permission to publish this Parallel',
-      );
-    }
-
-    // Idempotent: if already public, return the current DTO without a redundant DB write.
-    const record = existing.isGhost
-      ? await this.prisma.userParallel.update({
-          where: { id: existing.id },
-          data: { isGhost: false },
-          select: parallelSelect,
-        })
-      : existing;
 
     return {
       id: record.id,

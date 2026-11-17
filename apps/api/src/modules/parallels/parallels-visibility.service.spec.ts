@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../database/prisma.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -7,13 +7,14 @@ import { StreakService } from '../quests/streak.service.js';
 import { ParallelsController } from './parallels.controller.js';
 import { ParallelsService } from './parallels.service.js';
 
-describe('ParallelsService — Ghost Mode visibility & ownership', () => {
+describe('ParallelsService — Ghost Mode visibility, atomicity & ownership', () => {
   let service: ParallelsService;
   let controller: ParallelsController;
   let prisma: {
     userParallel: {
       findFirst: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
   };
 
@@ -27,11 +28,10 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
 
   const buildRow = (overrides: Record<string, unknown> = {}) => ({
     id: 'up-owner-ghost',
-    userId: 'user-owner',
     strengthPct: 24.5,
     momentum: 1.2,
     streakCount: 3,
-    isGhost: true,
+    isGhost: false,
     isHidden: false,
     dismissedAt: null,
     suggestionReason: 'Emerged from your recent architecture saves.',
@@ -45,6 +45,7 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
       userParallel: {
         findFirst: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn(),
       },
     };
 
@@ -65,32 +66,38 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
     controller = module.get(ParallelsController);
   });
 
-  it('allows the owner to publish their own Ghost Parallel and updates only isGhost on that record', async () => {
-    const ghostRow = buildRow({ id: 'up-owner-ghost', isGhost: true });
+  it('atomically publishes the owner’s active Ghost Parallel and updates only isGhost', async () => {
     const publishedRow = buildRow({ id: 'up-owner-ghost', isGhost: false });
 
-    prisma.userParallel.findFirst.mockResolvedValue(ghostRow);
-    prisma.userParallel.update.mockResolvedValue(publishedRow);
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 1 });
+    prisma.userParallel.findFirst.mockResolvedValue(publishedRow);
 
     const result = await service.makeParallelPublic(
       'user-owner',
       'up-owner-ghost',
     );
 
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-owner-ghost',
+        userId: 'user-owner',
+        dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
+    expect(prisma.userParallel.update).not.toHaveBeenCalled();
+
     expect(prisma.userParallel.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           id: 'up-owner-ghost',
+          userId: 'user-owner',
           dismissedAt: null,
         },
-      }),
-    );
-
-    expect(prisma.userParallel.update).toHaveBeenCalledTimes(1);
-    expect(prisma.userParallel.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'up-owner-ghost' },
-        data: { isGhost: false },
       }),
     );
 
@@ -108,47 +115,74 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
     });
   });
 
-  it('rejects a non-owner attempting to publish another user’s Parallel with ForbiddenException', async () => {
-    const otherUsersGhost = buildRow({
-      id: 'up-victim-ghost',
-      userId: 'user-victim',
-      isGhost: true,
-    });
-
-    prisma.userParallel.findFirst.mockResolvedValue(otherUsersGhost);
-
-    await expect(
-      service.makeParallelPublic('user-attacker', 'up-victim-ghost'),
-    ).rejects.toThrow(ForbiddenException);
-
-    expect(prisma.userParallel.update).not.toHaveBeenCalled();
-  });
-
-  it('throws NotFoundException when the Parallel ID does not exist or was dismissed', async () => {
+  it('returns NotFoundException (404) for a non-owner without revealing existence or mutating DB', async () => {
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 0 });
     prisma.userParallel.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.makeParallelPublic('user-owner', 'non-existent-id'),
+      service.makeParallelPublic('user-attacker', 'up-victim-ghost'),
     ).rejects.toThrow(NotFoundException);
 
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-victim-ghost',
+        userId: 'user-attacker',
+        dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
     expect(prisma.userParallel.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          id: 'non-existent-id',
+          id: 'up-victim-ghost',
+          userId: 'user-attacker',
           dismissedAt: null,
+          isGhost: false,
         },
       }),
     );
-    expect(prisma.userParallel.update).not.toHaveBeenCalled();
   });
 
-  it('is idempotent when called on an already-public Parallel', async () => {
+  it('returns NotFoundException (404) for nonexistent or dismissed Parallels', async () => {
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 0 });
+    prisma.userParallel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.makeParallelPublic('user-owner', 'non-existent-or-dismissed'),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'non-existent-or-dismissed',
+        userId: 'user-owner',
+        dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
+  });
+
+  it('returns NotFoundException (404) if the Parallel is concurrently dismissed before post-update read', async () => {
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 1 });
+    prisma.userParallel.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.makeParallelPublic('user-owner', 'up-concurrently-dismissed'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('is idempotent for an already-public Parallel owned by caller (0 rows updated, returns 200 DTO)', async () => {
     const alreadyPublicRow = buildRow({
       id: 'up-already-public',
-      userId: 'user-owner',
       isGhost: false,
     });
 
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 0 });
     prisma.userParallel.findFirst.mockResolvedValue(alreadyPublicRow);
 
     const result = await service.makeParallelPublic(
@@ -156,38 +190,77 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
       'up-already-public',
     );
 
-    expect(prisma.userParallel.update).not.toHaveBeenCalled();
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-already-public',
+        userId: 'user-owner',
+        dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
+    expect(prisma.userParallel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'up-already-public',
+          userId: 'user-owner',
+          dismissedAt: null,
+          isGhost: false,
+        },
+      }),
+    );
     expect(result.id).toBe('up-already-public');
     expect(result.isGhost).toBe(false);
     expect(result.isHidden).toBe(false);
   });
 
-  it('does not alter isHidden when publishing a Parallel (keeps Ghost and Hidden distinct)', async () => {
-    const hiddenGhostRow = buildRow({
-      id: 'up-hidden-ghost',
-      isGhost: true,
-      isHidden: true,
-    });
-    const updatedRow = buildRow({
+  it('handles concurrent publication calls idempotently when one updates and the other sees 0 rows', async () => {
+    const publicRow = buildRow({ id: 'up-race', isGhost: false });
+
+    prisma.userParallel.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.userParallel.findFirst.mockResolvedValue(publicRow);
+
+    const [res1, res2] = await Promise.all([
+      service.makeParallelPublic('user-owner', 'up-race'),
+      service.makeParallelPublic('user-owner', 'up-race'),
+    ]);
+
+    expect(res1.isGhost).toBe(false);
+    expect(res2.isGhost).toBe(false);
+    expect(res1.id).toBe('up-race');
+    expect(res2.id).toBe('up-race');
+  });
+
+  it('preserves isHidden when publishing a hidden Parallel (keeps Ghost and Hidden distinct)', async () => {
+    const updatedHiddenRow = buildRow({
       id: 'up-hidden-ghost',
       isGhost: false,
       isHidden: true,
     });
 
-    prisma.userParallel.findFirst.mockResolvedValue(hiddenGhostRow);
-    prisma.userParallel.update.mockResolvedValue(updatedRow);
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 1 });
+    prisma.userParallel.findFirst.mockResolvedValue(updatedHiddenRow);
 
     const result = await service.makeParallelPublic(
       'user-owner',
       'up-hidden-ghost',
     );
 
-    expect(prisma.userParallel.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'up-hidden-ghost' },
-        data: { isGhost: false },
-      }),
-    );
+    expect(prisma.userParallel.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'up-hidden-ghost',
+        userId: 'user-owner',
+        dismissedAt: null,
+        isGhost: true,
+      },
+      data: {
+        isGhost: false,
+      },
+    });
     expect(result.isGhost).toBe(false);
     expect(result.isHidden).toBe(true);
   });
@@ -204,12 +277,15 @@ describe('ParallelsService — Ghost Mode visibility & ownership', () => {
     });
   });
 
-  it('controller delegates makeParallelPublic to ParallelsService with authenticated user id', async () => {
-    const ghostRow = buildRow({ id: 'up-ctrl', isGhost: true });
-    const publishedRow = buildRow({ id: 'up-ctrl', isGhost: false });
+  it('controller binds JwtAuthGuard and delegates makeParallelPublic with authenticated user id', async () => {
+    const guards = Reflect.getMetadata('__guards__', ParallelsController) as
+      | unknown[]
+      | undefined;
+    expect(guards).toContain(JwtAuthGuard);
 
-    prisma.userParallel.findFirst.mockResolvedValue(ghostRow);
-    prisma.userParallel.update.mockResolvedValue(publishedRow);
+    const publishedRow = buildRow({ id: 'up-ctrl', isGhost: false });
+    prisma.userParallel.updateMany.mockResolvedValue({ count: 1 });
+    prisma.userParallel.findFirst.mockResolvedValue(publishedRow);
 
     const result = await controller.makeParallelPublic(
       { id: 'user-owner' },
