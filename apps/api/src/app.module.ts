@@ -20,6 +20,7 @@ import { UsersModule } from './modules/users/users.module.js';
 import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
 import { IdentityEngineModule } from './modules/identity-engine/identity-engine.module.js';
 import { ParallelsModule } from './modules/parallels/parallels.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
     IdentityEngineModule,
     ParallelsModule,
     QuestsModule,
+    NotificationsModule,
     // Feature modules land here as they're built (blueprint §16):
     // FeedModule, SocialModule, CommunitiesModule, EventsModule, WrappedModule,
     // CardsModule, NotificationsModule, AdminModule.

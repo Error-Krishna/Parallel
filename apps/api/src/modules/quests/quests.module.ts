@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import { QuestsController } from './quests.controller.js';
 import { QuestProgressController } from './quest-progress.controller.js';
 import { QuestsService } from './quests.service.js';
 import { StreakService } from './streak.service.js';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, NotificationsModule],
   controllers: [QuestsController, QuestProgressController],
   providers: [QuestsService, StreakService],
   exports: [StreakService],

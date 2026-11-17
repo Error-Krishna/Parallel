@@ -9,6 +9,7 @@ import type {
   HealthResponse,
   IdentityCardDto,
   LoginDto,
+  NotificationsListResponse,
   OnboardingAnswerDto,
   OnboardingQuestion,
   OnboardingStatusDto,
@@ -328,6 +329,27 @@ export function createParallelApi(http: AxiosInstance) {
       },
       latest: async (): Promise<WrappedRecapDto | null> => {
         const { data } = await http.get<WrappedRecapDto | null>('/v1/wrapped/latest');
+        return data;
+      },
+    },
+    notifications: {
+      list: async (params?: {
+        cursor?: string;
+        limit?: number;
+      }): Promise<NotificationsListResponse> => {
+        const { data } = await http.get<NotificationsListResponse>(
+          '/v1/notifications',
+          { params },
+        );
+        return data;
+      },
+      markRead: async (notificationId: string): Promise<void> => {
+        await http.post(`/v1/notifications/${notificationId}/read`);
+      },
+      markAllRead: async (): Promise<{ updatedCount: number }> => {
+        const { data } = await http.post<{ updatedCount: number }>(
+          '/v1/notifications/read-all',
+        );
         return data;
       },
     },

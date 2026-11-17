@@ -17,6 +17,7 @@ export interface TwinMatch {
   sharedParallelTypeIds: string[];
 }
 import { PrismaService } from '../../database/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { UpdateUserDto } from './dto/update-user.dto.js';
 
 interface CreateUserInput {
@@ -147,6 +148,18 @@ export class UsersService {
         },
       }),
     ]);
+
+    if (this.notifications) {
+      const follower = await this.prisma.user.findUnique({
+        where: { id: followerId },
+        select: { username: true },
+      });
+
+      await this.notifications.create(followeeId, 'NEW_FOLLOWER', {
+        followerId,
+        followerUsername: follower?.username ?? null,
+      });
+    }
   }
 
   async getFollowingIds(userId: string): Promise<string[]> {
@@ -408,6 +421,18 @@ export class UsersService {
 
     const [userAIdSorted, userBIdSorted] = [userAId, userBId].sort();
 
+    const existingTwin = this.notifications
+      ? await this.prisma.twin.findUnique({
+          where: {
+            userAId_userBId: {
+              userAId: userAIdSorted,
+              userBId: userBIdSorted,
+            },
+          },
+          select: { id: true },
+        })
+      : null;
+
     const twin = await this.prisma.twin.upsert({
       where: {
         userAId_userBId: {
@@ -427,6 +452,34 @@ export class UsersService {
         computedAt: new Date(),
       },
     });
+
+    if (this.notifications && !existingTwin) {
+      const [userA, userB] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userAIdSorted },
+          select: { username: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: userBIdSorted },
+          select: { username: true },
+        }),
+      ]);
+
+      await Promise.all([
+        this.notifications.create(userAIdSorted, 'TWIN_MATCHED', {
+          twinId: twin.id,
+          otherUserId: userBIdSorted,
+          otherUsername: userB?.username ?? null,
+          similarityScore: twin.similarityScore,
+        }),
+        this.notifications.create(userBIdSorted, 'TWIN_MATCHED', {
+          twinId: twin.id,
+          otherUserId: userAIdSorted,
+          otherUsername: userA?.username ?? null,
+          similarityScore: twin.similarityScore,
+        }),
+      ]);
+    }
 
     return {
       userId: userBId,

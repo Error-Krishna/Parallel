@@ -12,6 +12,7 @@ import type {
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
 import { ParallelCard } from '@/features/parallels/parallel-card';
+import { NotificationBell } from '@/features/notifications/notification-bell';
 import { getParallelColor, ParallelIcon } from '@/features/parallels/parallel-visuals';
 
 export default function MapPage() {
@@ -119,6 +120,8 @@ export default function MapPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificationBell />
+
             <button
               type="button"
               onClick={() => router.push('/profile')}

@@ -233,3 +233,17 @@ export interface QuestDto {
   season: string | null;
   progress: QuestProgressDto;
 }
+
+export interface NotificationDto {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationsListResponse {
+  items: NotificationDto[];
+  nextCursor: string | null;
+  unreadCount: number;
+}

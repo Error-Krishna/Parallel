@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { StreakService } from './streak.service.js';
 
 @Injectable()
@@ -7,6 +8,7 @@ export class QuestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly streakService: StreakService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async getQuests(userId: string, parallelId: string) {
@@ -101,6 +103,7 @@ export class QuestsService {
       where: { id: questId },
       select: {
         id: true,
+        title: true,
         parallelTypeId: true,
         steps: true,
         rewardType: true,
@@ -203,6 +206,16 @@ export class QuestsService {
         type: grantedReward.rewardType,
         value: grantedReward.rewardValue,
       };
+
+      if (this.notifications) {
+        await this.notifications.create(userId, 'QUEST_COMPLETED', {
+          questId: quest.id,
+          questTitle: quest.title ?? 'Quest',
+          parallelTypeId: quest.parallelTypeId,
+          rewardType: reward.type,
+          rewardValue: reward.value,
+        });
+      }
     }
 
     return {
