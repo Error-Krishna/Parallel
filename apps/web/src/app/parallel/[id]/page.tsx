@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Bookmark, Heart, UserPlus } from 'lucide-react';
+import { ArrowLeft, Bookmark, EyeOff, Globe, Heart, UserPlus } from 'lucide-react';
 import type {
   ContentItemDto,
   ParallelMapResponse,
@@ -48,6 +48,9 @@ export default function ParallelDetailPage() {
 
   const [parallel, setParallel] = useState<ParallelTypeDto | null>(null);
   const [parallelMap, setParallelMap] = useState<ParallelMapResponse | null>(null);
+  const [publishingGhost, setPublishingGhost] = useState(false);
+  const [publishGhostError, setPublishGhostError] = useState<string | null>(null);
+  const [publishedGhostNotice, setPublishedGhostNotice] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>('feed');
   const [quests, setQuests] = useState<QuestDto[] | null>(null);
@@ -414,9 +417,66 @@ export default function ParallelDetailPage() {
 
           <div>
             {currentParallel?.isGhost && (
-              <span className="inline-flex rounded-full border border-border px-2.5 py-1 text-[10px] font-medium tracking-wider text-muted-foreground">
-                NEW DISCOVERY
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                  title="Only visible to you until you make it public"
+                >
+                  <EyeOff className="h-3 w-3" aria-hidden="true" />
+                  Ghost · Private
+                </span>
+
+                <button
+                  type="button"
+                  disabled={publishingGhost}
+                  aria-busy={publishingGhost}
+                  onClick={async () => {
+                    if (!currentParallel || publishingGhost) return;
+                    setPublishingGhost(true);
+                    setPublishGhostError(null);
+                    try {
+                      const updated = await api.parallels.makePublic(
+                        currentParallel.id,
+                      );
+                      setParallelMap((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              parallels: prev.parallels.map((item) =>
+                                item.id === updated.id ? updated : item,
+                              ),
+                            }
+                          : prev,
+                      );
+                      setPublishedGhostNotice(true);
+                    } catch (err) {
+                      setPublishGhostError(
+                        err instanceof Error
+                          ? err.message
+                          : 'Could not publish this Parallel right now.',
+                      );
+                    } finally {
+                      setPublishingGhost(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                  {publishingGhost ? 'Publishing...' : 'Make public'}
+                </button>
+              </div>
+            )}
+
+            {publishedGhostNotice && !currentParallel?.isGhost && (
+              <p role="status" className="text-xs font-medium text-emerald-400">
+                Published — now visible on your profile and in discovery.
+              </p>
+            )}
+
+            {publishGhostError && (
+              <p role="alert" className="mt-2 text-xs text-destructive">
+                {publishGhostError}
+              </p>
             )}
 
             <h1 className="mt-3 text-3xl font-bold tracking-tight">{parallel.name}</h1>

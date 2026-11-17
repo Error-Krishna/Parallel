@@ -2,17 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil } from 'lucide-react';
-import type { PublicUser, UserVisibleParallelDto } from '@parallel/shared-types';
+import { ArrowLeft, Download, LogOut, Pencil, Shield, Trash2 } from 'lucide-react';
+import type { PublicUser, UserParallelDto } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
+import { useAuthStore } from '@/features/auth/auth-store';
+import { MyParallelsManager } from '@/features/parallels/my-parallels-manager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export default function ProfilePage() {
   const router = useRouter();
+  const clearAuth = useAuthStore((state) => state.clearAuth);
   const [user, setUser] = useState<PublicUser | null>(null);
-  const [parallels, setParallels] = useState<UserVisibleParallelDto[]>([]);
+  const [parallels, setParallels] = useState<UserParallelDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState('');
@@ -20,24 +23,38 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const [profileVisibility, setProfileVisibility] = useState<
+    'public' | 'friends' | 'private'
+  >('public');
+  const [showActivityStatus, setShowActivityStatus] = useState(true);
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
+  const [privacyStatus, setPrivacyStatus] = useState<string | null>(null);
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+
+  const [exporting, setExporting] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadProfile() {
       try {
-        const currentUser = await api.users.getMe();
+        const [currentUser, manageableParallels] = await Promise.all([
+          api.users.getMe(),
+          api.parallels.listManageable(),
+        ]);
 
         if (cancelled) return;
 
         setUser(currentUser);
         setUsername(currentUser.username);
         setBio(currentUser.bio ?? '');
-
-        const userParallels = await api.users.getUserParallels(currentUser.id);
-
-        if (!cancelled) {
-          setParallels(userParallels);
-        }
+        setParallels(manageableParallels);
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -55,6 +72,92 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, []);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await api.auth.logout();
+    } catch {
+      // Clear local session even if token was already expired/revoked.
+    } finally {
+      clearAuth();
+      router.replace('/');
+    }
+  }
+
+  async function handleSavePrivacy() {
+    if (savingPrivacy) return;
+    setSavingPrivacy(true);
+    setPrivacyStatus(null);
+    setPrivacyError(null);
+
+    try {
+      await api.users.updateMe({
+        visibilitySettings: {
+          profileVisibility,
+          showActivityStatus,
+        },
+      });
+      setPrivacyStatus('Privacy preferences saved.');
+    } catch (err) {
+      setPrivacyError(
+        err instanceof Error
+          ? err.message
+          : 'Could not update your privacy settings.',
+      );
+    } finally {
+      setSavingPrivacy(false);
+    }
+  }
+
+  async function handleExportData() {
+    if (exporting) return;
+    setExporting(true);
+    setPrivacyError(null);
+    setPrivacyStatus(null);
+
+    try {
+      const exported = await api.users.exportData();
+      const blob = new Blob([JSON.stringify(exported, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `parallel-data-${user?.username ?? 'export'}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setPrivacyStatus('Your data export has downloaded.');
+    } catch (err) {
+      setPrivacyError(
+        err instanceof Error ? err.message : 'Could not export your data.',
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (deleting || deleteConfirmText.trim() !== 'DELETE') return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await api.users.deleteMe();
+      clearAuth();
+      router.replace('/');
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error
+          ? err.message
+          : 'Could not delete your account right now.',
+      );
+      setDeleting(false);
+    }
+  }
 
   if (error) {
     return (
@@ -80,14 +183,26 @@ export default function ProfilePage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8 lg:px-10">
-        <button
-          type="button"
-          onClick={() => router.push('/map')}
-          className="mb-10 flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to map
-        </button>
+        <div className="mb-10 flex items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={() => router.push('/map')}
+            className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to map
+          </button>
+
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loggingOut}
+            onClick={() => void handleLogout()}
+          >
+            <LogOut className="h-4 w-4" />
+            {loggingOut ? 'Logging out...' : 'Log out'}
+          </Button>
+        </div>
 
         <section className="max-w-2xl">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
@@ -97,6 +212,7 @@ export default function ProfilePage() {
           <div className="mt-6 flex items-start gap-5">
             <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-2xl font-semibold">
               {user.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={user.avatarUrl}
                   alt={`@${user.username}`}
@@ -163,7 +279,9 @@ export default function ProfilePage() {
                 </div>
 
                 {saveError && (
-                  <p className="text-sm text-destructive">{saveError}</p>
+                  <p role="alert" className="text-sm text-destructive">
+                    {saveError}
+                  </p>
                 )}
 
                 <div className="flex gap-3">
@@ -210,56 +328,152 @@ export default function ProfilePage() {
           )}
         </section>
 
-        <section className="mt-12 max-w-2xl">
-          <div className="rounded-2xl border border-border bg-card p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                  Identity evolution
-                </p>
-                <h2 className="mt-2 text-xl font-semibold">
-                  See how your sides are changing.
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Track how your Parallel strengths evolve as you explore,
-                  interact, and discover new sides of yourself.
-                </p>
-              </div>
-
-              <Button
-                variant="outline"
-                onClick={() => router.push('/map')}
-              >
-                View evolution
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-16">
+        <section className="mt-14 max-w-4xl">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
-            Your parallels
+            My parallels
+          </p>
+          <h2 className="mt-2 text-xl font-semibold">
+            Control what’s public, hidden, or removed.
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Ghost Parallels stay private until you publish them. Hidden Parallels
+            leave your map reversibly; removing a Parallel tells Parallel not to
+            suggest it again.
           </p>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {parallels.map((parallel) => (
-              <div
-                key={parallel.id}
-                className="rounded-2xl border border-border p-5"
-              >
-                <h2 className="font-semibold">
-                  {parallel.parallelType.name}
-                </h2>
+          <MyParallelsManager parallels={parallels} onChange={setParallels} />
+        </section>
 
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {parallel.parallelType.description}
-                </p>
+        <section className="mt-14 max-w-2xl">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Privacy &amp; Data
+              </p>
+            </div>
 
-                <p className="mt-4 font-mono text-xs text-muted-foreground">
-                  {parallel.strengthPct.toFixed(1)}% strength
-                </p>
+            <div className="mt-6 space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="profile-visibility">Profile visibility</Label>
+                <select
+                  id="profile-visibility"
+                  value={profileVisibility}
+                  onChange={(e) =>
+                    setProfileVisibility(
+                      e.target.value as 'public' | 'friends' | 'private',
+                    )
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="public">Public — anyone can see your published Parallels</option>
+                  <option value="friends">Friends — people you connect with</option>
+                  <option value="private">Private — only visible to you</option>
+                </select>
               </div>
-            ))}
+
+              <label className="flex items-center gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showActivityStatus}
+                  onChange={(e) => setShowActivityStatus(e.target.checked)}
+                />
+                <span>Show activity status</span>
+              </label>
+
+              {privacyStatus && (
+                <p role="status" className="text-sm text-emerald-400">
+                  {privacyStatus}
+                </p>
+              )}
+
+              {privacyError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {privacyError}
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={savingPrivacy}
+                  onClick={() => void handleSavePrivacy()}
+                >
+                  {savingPrivacy ? 'Saving...' : 'Save privacy settings'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={exporting}
+                  onClick={() => void handleExportData()}
+                >
+                  <Download className="h-4 w-4" />
+                  {exporting ? 'Exporting...' : 'Export my data (JSON)'}
+                </Button>
+              </div>
+
+              <div className="border-t border-border pt-5">
+                {!showDeleteConfirm ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setShowDeleteConfirm(true);
+                      setDeleteConfirmText('');
+                      setDeleteError(null);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete my account
+                  </Button>
+                ) : (
+                  <div className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+                    <p className="text-sm font-medium text-destructive">
+                      Delete account permanently
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      This irreversibly deletes your account, Parallels, signals,
+                      and sessions immediately. Type <strong>DELETE</strong> to
+                      confirm.
+                    </p>
+                    <Input
+                      aria-label="Type DELETE to confirm account deletion"
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder="DELETE"
+                    />
+                    {deleteError && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {deleteError}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        disabled={
+                          deleting || deleteConfirmText.trim() !== 'DELETE'
+                        }
+                        onClick={() => void handleDeleteAccount()}
+                      >
+                        {deleting ? 'Deleting...' : 'Permanently delete'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={deleting}
+                        onClick={() => setShowDeleteConfirm(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       </div>
