@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Network, Sparkles, UserCircle, Users } from 'lucide-react';
@@ -20,28 +20,48 @@ export default function MapPage() {
   const [evolution, setEvolution] = useState<ParallelEvolutionDto[]>([]);
   const [twins, setTwins] = useState<TwinMatchDto[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  const twinsRequestIdRef = useRef(0);
+
+  function refreshTwins() {
+    const requestId = ++twinsRequestIdRef.current;
+
+    void api.users
+      .getTwins()
+      .then((nextTwins) => {
+        if (isMountedRef.current && requestId === twinsRequestIdRef.current) {
+          setTwins(nextTwins);
+        }
+      })
+      .catch(() => {
+        // Twins refresh is best-effort; publication already succeeded.
+      });
+  }
 
   useEffect(() => {
     let cancelled = false;
+    isMountedRef.current = true;
 
     async function loadMap() {
+      const initialTwinsRequestId = ++twinsRequestIdRef.current;
+
       try {
         const [result, evolutionResult, twinsResult] = await Promise.all([
           api.parallels.getMap(),
           api.parallels.getEvolution(),
-          // GET /v1/users/twins recomputes matches on read (see UsersController) —
-          // fine to call here even though the map page doesn't strictly need it,
-          // since it's what makes the "Discover people" button below meaningful.
+          // GET /v1/users/twins reads persisted Twin matches for the header button.
           api.users.getTwins(),
         ]);
 
-        if (!cancelled) {
+        if (!cancelled && isMountedRef.current) {
           setMap(result);
           setEvolution(evolutionResult);
-          setTwins(twinsResult);
+          if (initialTwinsRequestId === twinsRequestIdRef.current) {
+            setTwins(twinsResult);
+          }
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && isMountedRef.current) {
           setError(
             err instanceof Error
               ? err.message
@@ -55,6 +75,8 @@ export default function MapPage() {
 
     return () => {
       cancelled = true;
+      isMountedRef.current = false;
+      twinsRequestIdRef.current += 1;
     };
   }, []);
 
@@ -199,12 +221,7 @@ export default function MapPage() {
                           }
                         : current,
                     );
-                    void api.users
-                      .getTwins()
-                      .then((nextTwins) => setTwins(nextTwins))
-                      .catch(() => {
-                        // Twins refresh is best-effort; publication already succeeded.
-                      });
+                    refreshTwins();
                   }}
                   onHide={(parallelId) => {
                     setMap((current) =>

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { UserParallelDto } from '@parallel/shared-types';
+import type { TwinMatchDto, UserParallelDto } from '@parallel/shared-types';
 import { ParallelCard } from '../parallel-card';
 import MapPage from '@/app/map/page';
 
@@ -265,5 +265,178 @@ describe('ParallelCard Ghost Mode visibility controls', () => {
     expect(mockApi.parallels.makePublic).toHaveBeenCalledWith('up-a');
     expect(screen.getAllByRole('button', { name: /Make public/i })).toHaveLength(1);
     expect(screen.getByRole('status').textContent).toMatch(/Published/i);
+  });
+
+  it('prevents an older out-of-order Twins refresh from overwriting newer Twins data across multiple publications', async () => {
+    const user = userEvent.setup();
+    const ghostA = buildParallel({
+      id: 'up-race-a',
+      isGhost: true,
+      parallelType: {
+        id: 'pt-race-a',
+        name: 'The Urbanist',
+        description: 'City explorer',
+        icon: 'compass',
+      },
+    });
+    const ghostB = buildParallel({
+      id: 'up-race-b',
+      isGhost: true,
+      parallelType: {
+        id: 'pt-race-b',
+        name: 'Synth Maker',
+        description: 'Audio tinkerer',
+        icon: 'music',
+      },
+    });
+
+    const staleTwin: TwinMatchDto = {
+      id: 'twin-stale',
+      user: { id: 'u-stale', username: 'stale_twin', avatarUrl: null, bio: null },
+      similarityScore: 78,
+      sharedParallelTypeIds: ['pt-race-a'],
+      computedAt: '2026-11-18T00:00:00.000Z',
+    };
+    const latestTwin: TwinMatchDto = {
+      id: 'twin-latest',
+      user: { id: 'u-latest', username: 'latest_twin', avatarUrl: null, bio: null },
+      similarityScore: 95,
+      sharedParallelTypeIds: ['pt-race-a', 'pt-race-b'],
+      computedAt: '2026-11-18T00:00:01.000Z',
+    };
+
+    let resolveTwinsAfterA!: (value: TwinMatchDto[]) => void;
+    let resolveTwinsAfterB!: (value: TwinMatchDto[]) => void;
+
+    mockApi.parallels.getMap.mockResolvedValue({
+      user: { id: 'u-1', username: 'maya', avatarUrl: null, bio: null },
+      parallels: [ghostA, ghostB],
+    });
+    mockApi.parallels.getEvolution.mockResolvedValue([]);
+    mockApi.users.getTwins
+      .mockResolvedValueOnce([]) // initial map load
+      .mockImplementationOnce(
+        () =>
+          new Promise<TwinMatchDto[]>((resolve) => {
+            resolveTwinsAfterA = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<TwinMatchDto[]>((resolve) => {
+            resolveTwinsAfterB = resolve;
+          }),
+      );
+
+    mockApi.parallels.makePublic
+      .mockResolvedValueOnce({ ...ghostA, isGhost: false })
+      .mockResolvedValueOnce({ ...ghostB, isGhost: false });
+
+    render(<MapPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'The Urbanist' }),
+      ).toBeTruthy();
+    });
+
+    // Publish first Ghost Parallel -> triggers getTwins() request #2
+    await user.click(screen.getAllByRole('button', { name: /Make public/i })[0]);
+    await waitFor(() => {
+      expect(mockApi.users.getTwins).toHaveBeenCalledTimes(2);
+    });
+
+    // Publish second Ghost Parallel before request #2 resolves -> triggers getTwins() request #3
+    await user.click(screen.getByRole('button', { name: /Make public/i }));
+    await waitFor(() => {
+      expect(mockApi.users.getTwins).toHaveBeenCalledTimes(3);
+    });
+
+    // Resolve the NEWER request (#3) first
+    await act(async () => {
+      resolveTwinsAfterB([latestTwin]);
+      await Promise.resolve();
+    });
+
+    const twinButton = screen.getByRole('button', {
+      name: /View your Parallel Twin/i,
+    });
+    expect(twinButton.getAttribute('title')).toContain('@latest_twin');
+
+    // Now resolve the STALE older request (#2) — it must NOT overwrite latestTwin
+    await act(async () => {
+      resolveTwinsAfterA([staleTwin]);
+      await Promise.resolve();
+    });
+
+    expect(twinButton.getAttribute('title')).toContain('@latest_twin');
+    await user.click(twinButton);
+    expect(mockPush).toHaveBeenCalledWith('/twins/twin-latest');
+  });
+
+  it('ignores outstanding Twins refreshes after MapPage unmounts', async () => {
+    const user = userEvent.setup();
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+
+    const ghost = buildParallel({ id: 'up-unmount', isGhost: true });
+    const postUnmountTwin: TwinMatchDto = {
+      id: 'twin-after-unmount',
+      user: {
+        id: 'u-late',
+        username: 'late_twin',
+        avatarUrl: null,
+        bio: null,
+      },
+      similarityScore: 88,
+      sharedParallelTypeIds: ['pt-urbanist'],
+      computedAt: '2026-11-18T00:00:02.000Z',
+    };
+
+    let resolveLateTwins!: (value: TwinMatchDto[]) => void;
+
+    mockApi.parallels.getMap.mockResolvedValue({
+      user: { id: 'u-1', username: 'maya', avatarUrl: null, bio: null },
+      parallels: [ghost],
+    });
+    mockApi.parallels.getEvolution.mockResolvedValue([]);
+    mockApi.users.getTwins
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise<TwinMatchDto[]>((resolve) => {
+            resolveLateTwins = resolve;
+          }),
+      );
+    mockApi.parallels.makePublic.mockResolvedValue({
+      ...ghost,
+      isGhost: false,
+    });
+
+    const { unmount } = render(<MapPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'The Urbanist' }),
+      ).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Make public/i }));
+    await waitFor(() => {
+      expect(mockApi.users.getTwins).toHaveBeenCalledTimes(2);
+    });
+
+    // Unmount while the Twins refresh promise is still pending
+    unmount();
+
+    // Resolving after unmount must not trigger state updates or React errors
+    await act(async () => {
+      resolveLateTwins([postUnmountTwin]);
+      await Promise.resolve();
+    });
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 });
