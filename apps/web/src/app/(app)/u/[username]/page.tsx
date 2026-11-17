@@ -10,6 +10,7 @@ import type {
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/features/auth/auth-store';
 import { getParallelColor, ParallelIcon } from '@/features/parallels/parallel-visuals';
+import { StartCollabModal } from '@/features/collab/components/start-collab-modal';
 
 export default function PublicProfilePage() {
   const params = useParams<{ username: string }>();
@@ -22,6 +23,7 @@ export default function PublicProfilePage() {
   const [myParallels, setMyParallels] = useState<UserVisibleParallelDto[]>([]);
   const [following, setFollowing] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,18 +135,28 @@ export default function PublicProfilePage() {
             </h1>
 
             {currentUser?.id !== user.id ? (
-              <button
-                type="button"
-                onClick={() => void handleFollow(user.id)}
-              className={[
-                'rounded-full border px-4 py-2 text-sm font-medium transition',
-                following
-                  ? 'border-border bg-muted text-foreground'
-                  : 'border-foreground/20 hover:bg-accent',
-              ].join(' ')}
-            >
-                {following ? 'Following' : 'Follow'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCollabModalOpen(true)}
+                  className="rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/20"
+                >
+                  Start Collab
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleFollow(user.id)}
+                  className={[
+                    'rounded-full border px-4 py-2 text-sm font-medium transition',
+                    following
+                      ? 'border-border bg-muted text-foreground'
+                      : 'border-foreground/20 hover:bg-accent',
+                  ].join(' ')}
+                >
+                  {following ? 'Following' : 'Follow'}
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -253,6 +265,13 @@ export default function PublicProfilePage() {
             </div>
           )}
         </section>
+
+        <StartCollabModal
+          targetUserId={user.id}
+          targetUsername={user.username}
+          isOpen={isCollabModalOpen}
+          onClose={() => setIsCollabModalOpen(false)}
+        />
       </div>
     </main>
   );

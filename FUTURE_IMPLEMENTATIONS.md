@@ -12,16 +12,33 @@
 
 ## 1. Current Development Position
 
-**Current phase: Phase 6 — Identity Engine**
+**Current phase: Phase 8 — Real-time**
 
-The project is currently implementing the Identity Engine expansion:
+The project has completed Phase 7 (Social, Twin Matching, Communities, Collab Parallels) and is implementing Phase 8 (Real-time).
 
-- Interest signals → identity scoring
-- Async embedding generation
-- pgvector storage
-- New Parallel detection
-- Ghost Mode handling
-- Hidden Parallel unlock logic
+### Current checkpoint
+
+**Step 1: Core Socket.IO Gateway & Handshake Auth: COMPLETED / VERIFIED**
+
+Verified end-to-end:
+
+```text
+Fastify HTTP server
+  ↓
+Socket.IO Gateway (EventsGateway)
+  ↓ Handshake middleware
+AuthService.verifyToken()
+  ↓ JWT signature, exp, sub, jti
+Redis check (auth:revoked:<jti>)
+  ↓ Pass
+Auto-join personal room (user:<userId>)
+```
+
+- Canonical handshake token: `handshake.auth.token`
+- Compatibility header: `handshake.headers.authorization` (`Bearer <token>`)
+- Revoked tokens rejected via Redis key `auth:revoked:${jti}`
+- Arbitrary client room subscriptions strictly forbidden
+- 13 unit tests & 9 real Fastify-bootstrap E2E tests verified
 
 ### Current checkpoint
 
@@ -316,17 +333,19 @@ Future work:
 
 ## 4.3 People Discovery
 
-**Status: PARTIAL / IMPLEMENTED BASE**
+**Status: COMPLETED / VERIFIED**
 
-Current implementation can discover people through shared Parallels.
+People Discovery uses multi-Parallel intersections and explainable recommendations:
 
-Future work:
-
-- Improve discovery ranking.
-- Integrate strength/momentum/similarity.
-- Respect Ghost Mode and visibility in every path.
-- Add better intersection explanations.
-- Connect discovery to Twin/Community/Collab flows.
+- Computes actual shared visible Parallels between requesting user and candidates.
+- Prioritizes multi-Parallel intersections ($\ge 2$) ahead of single-parallel candidates.
+- Ranks candidates by intersection size desc, average shared strength desc, current parallel strength desc, and deterministic tie-breaking.
+- Generates plain-language explanations (e.g. "Both exploring Builder + Urbanist").
+- Highlights shared Parallels separately from candidate's other Parallels ("Also explores").
+- Fully preserves existing Twin badge and comparison link when candidate qualifies as a Twin.
+- Strict backend privacy enforcement: ghost, hidden, and dismissed Parallels excluded on both sides.
+- Requesting user strictly excluded from candidates.
+- Tested and verified in backend and frontend.
 
 ---
 
@@ -346,79 +365,102 @@ Future work:
 
 ## 4.5 Parallel Twin
 
-**Status: PARTIAL / IMPLEMENTED BASE**
+**Status: COMPLETED / VERIFIED**
 
-Twin queue/processor infrastructure exists.
+Twin matching algorithm and UI are fully functional:
 
-Future work:
+- Requires minimum 2 shared visible Parallels (single-parallel coincidences cannot produce a Twin match).
+- Combines strength closeness across shared Parallels with profile overlap factor (harmonic Jaccard/Dice scaling).
+- Penalizes mostly-disjoint profiles below the 70% persistence threshold.
+- Filters out ghost, hidden, and dismissed Parallels strictly on both sides.
+- Automatically cleans up stale matches on recomputation if profile divergence causes the score to drop below 70%.
+- Preserves canonical user ID ordering (`userAId < userBId`) in database upserts and deletions.
+- Backed by BullMQ scheduled processing every 15 minutes.
+- Verified in Twin comparison UI at `/twins/[id]`.
 
-- Complete robust Twin computation.
-- Use identity/embedding intersections.
-- Improve match explanation.
-- Build complete Twin UI.
-- Verify two-account unusual shared-intersection discovery.
-- Ensure Ghost/visibility rules are respected.
+### Future work
+
+- Embeddings-based similarity weighting if fine-grained semantic overlap within Parallels is needed post-MVP.
+- Real-time notification when a new Twin match is computed (Phase 8).
 
 ---
 
 ## 4.6 Communities
 
-**Status: NOT STARTED / MODEL SCAFFOLD MAY EXIST**
+**Status: COMPLETED / VERIFIED**
 
-Future work:
+Core community functionality implemented and verified:
 
-- Emergent community detection.
-- Community seeding.
-- Membership flow.
-- Community discovery UI.
-- Community interaction signals.
-- Privacy/visibility handling.
-- Connect communities to Parallels and Identity Engine.
+- Recommended communities endpoint.
+- Join and skip/dismissal flows with non-optimistic member counts.
+- Visible Parallel eligibility and intersection size checks (minimum size 2).
+- Emergent community detection BullMQ job running every 6 hours.
+- Seeding script and frontend UI card component.
+
+### Future work
+
+- Community-specific feed / discussions / events.
+- Collab Parallels tied into communities.
 
 ---
 
 ## 4.7 Collab Parallels
 
-**Status: NOT STARTED**
+**Status: COMPLETED**
 
-Future work:
+Implemented and verified:
 
-- Collab discovery.
-- Shared Parallel collaboration.
-- Collaboration lifecycle/state.
-- UI.
-- Interaction signals.
-- Identity impact.
-- Privacy and moderation rules.
+- Backend module (`apps/api/src/modules/collab`):
+  - `CollabService`, `CollabController`, DTOs, challenge generator.
+  - Endpoints for invite, accept, cancel/decline, complete, session queries.
+  - Full lifecycle tracking: `PENDING → ACTIVE → COMPLETED / CANCELLED`.
+  - Privacy guarantees: only active, visible Parallels (`isGhost: false, isHidden: false, dismissedAt: null`) can be chosen.
+  - Prevention of self-invites and duplicate active/pending sessions between the same pair.
+  - Shared challenge generation (signature pairings like Explorer + Foodie, plus dynamic fallback).
+  - Dual-participant progress completion with `CHALLENGE_COMPLETE` `InterestSignal` emissions and streak updates.
+  - Safe Prisma schema migration for `CollabSession` (nullable `parallelTypeBId`, challenge fields, participant completion flags).
+- Shared contracts:
+  - `@parallel/shared-types`: `CollabStatus`, `CollabSessionDto`, `CreateCollabDto`, `AcceptCollabDto`.
+  - `@parallel/api-client`: typed `collab` API wrapper methods.
+- Frontend implementation (`apps/web`):
+  - User profile integration: "Start Collab" trigger & `StartCollabModal` on `/u/[username]`.
+  - Collab Hub dashboard (`/collab`): pending received/sent invites, active collabs, completed history.
+  - Session detail view (`/collab/[id]`): pending partner flow, `ParallelFusionCard`, `CollabChallengeView` with dual-completion checklist and "Complete My Part" action.
+  - Map page header navigation to `/collab`.
+- Comprehensive unit tests:
+  - Backend: `collab.service.spec.ts` (16 tests) and `collab.controller.spec.ts` (6 tests).
+  - Frontend: `collab-components.test.tsx` (6 tests).
 
 ---
 
 ## 4.8 Phase 7 Verification
 
-- [ ] Personalized Parallel feed
-- [ ] People discovery
+- [x] Personalized Parallel feed
+- [x] People discovery
 - [x] Follow/unfollow
-- [ ] Complete Twin system
-- [ ] Communities
-- [ ] Collab Parallels
-- [ ] Two-account discovery scenario
-- [ ] Ghost/visibility checks across social features
+- [x] Complete Twin system
+- [x] Communities
+- [x] Collab Parallels
+- [x] Two-account discovery scenario
+- [x] Ghost/visibility checks across social features
 
 ---
 
 # 5. Phase 8 — Realtime
 
-**Status: DEFERRED**
+**Status: IN PROGRESS**
 
-Do not build until Phase 7 is complete.
+Phase 7 acceptance audit completed and accepted. Phase 8 Step 1 implemented and verified.
 
 ## 5.1 Socket.IO
 
-- [ ] Socket.IO infrastructure
-- [ ] authenticated realtime connections
+- [x] Socket.IO infrastructure integrated with Fastify adapter (`EventsGateway`, `EventsModule`)
+- [x] Authenticated realtime connections (reusing `AuthService` token verification & claims validation)
+- [x] Redis token-revocation enforcement on handshake (`auth:revoked:${jti}`)
+- [x] Automatic personal user room joining (`user:<userId>`)
+- [x] Connection & disconnection lifecycle with sanitized diagnostic logging
+- [x] Arbitrary client-initiated room joining forbidden
 - [ ] presence
-- [ ] connection lifecycle
-- [ ] reconnect handling
 
 ## 5.2 Redis Pub/Sub
 
@@ -433,6 +475,7 @@ Implement realtime notifications for:
 - [ ] streak warnings
 - [ ] Quest completion
 - [ ] new Twin/match
+- [ ] Collab invitation, acceptance, completion
 - [ ] other blueprint-approved notification events
 
 ## 5.4 Notification Center

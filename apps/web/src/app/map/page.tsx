@@ -144,6 +144,16 @@ export default function MapPage() {
 
             <button
               type="button"
+              onClick={() => router.push('/collab')}
+              className="rounded-full border border-border p-2.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              aria-label="Collab Parallels"
+              title="Collab Parallels"
+            >
+              <Sparkles className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 if (twins[0]) router.push(`/twins/${twins[0].id}`);
               }}

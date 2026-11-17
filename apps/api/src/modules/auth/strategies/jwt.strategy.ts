@@ -1,16 +1,10 @@
-import {
-  Injectable,
-  ServiceUnavailableException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
-import { Inject } from '@nestjs/common';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { Redis } from 'ioredis';
 import type { AppConfig } from '../../../config/configuration.js';
-import { REDIS_CLIENT } from '../../../jobs/redis.provider.js';
 import type { AuthenticatedUser } from '../../../common/decorators/current-user.decorator.js';
+import { AuthService } from '../auth.service.js';
 
 interface JwtPayload {
   sub?: unknown;
@@ -22,7 +16,7 @@ interface JwtPayload {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly authService: AuthService,
   ) {
     const appConfig = config.get<AppConfig>('app');
 
@@ -46,47 +40,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    if (
-      typeof payload.sub !== 'string' ||
-      payload.sub.trim().length === 0
-    ) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    if (
-      typeof payload.jti !== 'string' ||
-      payload.jti.trim().length === 0
-    ) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    if (
-      typeof payload.exp !== 'number' ||
-      !Number.isFinite(payload.exp)
-    ) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    try {
-      const revoked = await this.redis.exists(`auth:revoked:${payload.jti}`);
-
-      if (revoked === 1) {
-        throw new UnauthorizedException('Token has been revoked');
-      }
-    } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-
-      throw new ServiceUnavailableException(
-        'Authentication service is temporarily unavailable',
-      );
-    }
-
-    return {
-      id: payload.sub,
-      jti: payload.jti,
-      exp: payload.exp,
-    };
+    return this.authService.validateTokenPayload(payload);
   }
 }

@@ -28,6 +28,10 @@ export interface AppConfig {
     minimumParallelStrength: number;
     minimumIntersectionSize: number;
   };
+  twin: {
+    minimumIntersectionSize: number;
+    matchThreshold: number;
+  };
   bcryptSaltRounds: number;
 }
 
@@ -73,6 +77,15 @@ export default (): { app: AppConfig } => ({
       minimumIntersectionSize: parseInt(
         process.env.COMMUNITY_MIN_INTERSECTION_SIZE ?? '2',
         10,
+      ),
+    },
+    twin: {
+      minimumIntersectionSize: parseInt(
+        process.env.TWIN_MIN_INTERSECTION_SIZE ?? '2',
+        10,
+      ),
+      matchThreshold: parseFloat(
+        process.env.TWIN_MATCH_THRESHOLD ?? '70',
       ),
     },
     // 12 is the production default (current standard baseline for 2026 hardware).

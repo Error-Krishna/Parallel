@@ -820,7 +820,7 @@ function QuestsTab({
   );
 }
 
-function PeopleTab({
+export function PeopleTab({
   router,
   loading,
   people,
@@ -879,9 +879,27 @@ function PeopleTab({
                 </p>
               )}
 
-              <p className="mt-2 text-sm text-muted-foreground">
-                You both explore <span className="font-medium text-foreground">{parallelName}</span>
-              </p>
+              {person.sharedParallels && person.sharedParallels.length >= 2 ? (
+                <div className="mt-2">
+                  <p className="text-sm font-medium text-foreground">
+                    {person.explanation}
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {person.sharedParallels.map((shared) => (
+                      <span
+                        key={shared.id}
+                        className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400"
+                      >
+                        {shared.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {person.explanation ?? `Both exploring ${parallelName}`}
+                </p>
+              )}
 
               {person.parallels.length > 0 && (
                 <div className="mt-2">

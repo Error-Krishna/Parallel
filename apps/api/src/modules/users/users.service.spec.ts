@@ -32,6 +32,7 @@ describe('UsersService', () => {
       twin: {
         upsert: vi.fn(),
         findMany: vi.fn(),
+        deleteMany: vi.fn(),
       },
     };
 
@@ -209,34 +210,32 @@ describe('UsersService', () => {
   });
 
   it('returns Twin matches with the other user first', async () => {
-    prisma.twin = {
-      findMany: vi.fn().mockResolvedValue([
-        {
-          id: 'twin-1',
-          userAId: '1',
-          userBId: '2',
-          sharedParallelTypeIds: ['builder'],
-          similarityScore: 90,
-          computedAt: new Date('2026-09-14T10:00:00.000Z'),
-          userA: {
-            id: '1',
-            username: 'alex',
-            email: 'a@example.com',
-            passwordHash: 'x',
-            avatarUrl: null,
-            bio: null,
-          },
-          userB: {
-            id: '2',
-            username: 'sam',
-            email: 's@example.com',
-            passwordHash: 'x',
-            avatarUrl: null,
-            bio: 'builder',
-          },
+    prisma.twin.findMany.mockResolvedValue([
+      {
+        id: 'twin-1',
+        userAId: '1',
+        userBId: '2',
+        sharedParallelTypeIds: ['builder'],
+        similarityScore: 90,
+        computedAt: new Date('2026-09-14T10:00:00.000Z'),
+        userA: {
+          id: '1',
+          username: 'alex',
+          email: 'a@example.com',
+          passwordHash: 'x',
+          avatarUrl: null,
+          bio: null,
         },
-      ]),
-    };
+        userB: {
+          id: '2',
+          username: 'sam',
+          email: 's@example.com',
+          passwordHash: 'x',
+          avatarUrl: null,
+          bio: 'builder',
+        },
+      },
+    ]);
 
     await expect(service.getTwinMatches('1')).resolves.toEqual([
       {
@@ -255,6 +254,9 @@ describe('UsersService', () => {
 
     expect(prisma.twin.findMany).toHaveBeenCalledWith({
       where: {
+        similarityScore: {
+          gte: 70,
+        },
         OR: [
           { userAId: '1' },
           { userBId: '1' },
@@ -339,15 +341,25 @@ describe('UsersService', () => {
         strengthPct: 80,
       },
       {
+        userId: 'user-z',
+        parallelTypeId: 'gamer',
+        strengthPct: 60,
+      },
+      {
         userId: 'user-a',
         parallelTypeId: 'builder',
         strengthPct: 70,
+      },
+      {
+        userId: 'user-a',
+        parallelTypeId: 'gamer',
+        strengthPct: 50,
       },
     ]);
 
     prisma.twin.upsert.mockResolvedValue({
       similarityScore: 90,
-      sharedParallelTypeIds: ['builder'],
+      sharedParallelTypeIds: ['builder', 'gamer'],
     });
 
     const result = await service.saveTwinMatch('user-z', 'user-a');
@@ -355,7 +367,7 @@ describe('UsersService', () => {
     expect(result).toEqual({
       userId: 'user-a',
       similarityScore: 90,
-      sharedParallelTypeIds: ['builder'],
+      sharedParallelTypeIds: ['builder', 'gamer'],
     });
 
     expect(prisma.twin.upsert).toHaveBeenCalledWith({
@@ -368,15 +380,149 @@ describe('UsersService', () => {
       create: {
         userAId: 'user-a',
         userBId: 'user-z',
-        sharedParallelTypeIds: ['builder'],
+        sharedParallelTypeIds: ['builder', 'gamer'],
         similarityScore: 90,
       },
       update: {
-        sharedParallelTypeIds: ['builder'],
+        sharedParallelTypeIds: ['builder', 'gamer'],
         similarityScore: 90,
         computedAt: expect.any(Date),
       },
     });
+  });
+
+  it('rejects a Twin match when users share only one Parallel even with identical strengths', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-1' },
+      { id: 'user-2' },
+    ]);
+
+    prisma.userParallel.findMany.mockResolvedValue([
+      {
+        userId: 'user-1',
+        parallelTypeId: 'gamer',
+        strengthPct: 85,
+      },
+      {
+        userId: 'user-2',
+        parallelTypeId: 'gamer',
+        strengthPct: 85,
+      },
+    ]);
+
+    const result = await service.calculateTwinMatch('user-1', 'user-2');
+
+    expect(result).toEqual({
+      userId: 'user-2',
+      similarityScore: 0,
+      sharedParallelTypeIds: [],
+    });
+
+    const saveResult = await service.saveTwinMatch('user-1', 'user-2');
+    expect(saveResult).toBeNull();
+    expect(prisma.twin.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userAId: 'user-1',
+        userBId: 'user-2',
+      },
+    });
+    expect(prisma.twin.upsert).not.toHaveBeenCalled();
+  });
+
+  it('penalizes mostly disjoint profiles below the Twin threshold despite shared Parallels', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-1' },
+      { id: 'user-2' },
+    ]);
+
+    // Both users have 6 Parallels; only 2 are shared (with identical 80% strength).
+    // Total distinct: 10. Jaccard: 2/10 = 0.20, overlap factor: 0.333, score: 57.74% < 70%.
+    prisma.userParallel.findMany.mockResolvedValue([
+      { userId: 'user-1', parallelTypeId: 'shared-1', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'shared-2', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'u1-a', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'u1-b', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'u1-c', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'u1-d', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'shared-1', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'shared-2', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'u2-a', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'u2-b', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'u2-c', strengthPct: 80 },
+      { userId: 'user-2', parallelTypeId: 'u2-d', strengthPct: 80 },
+    ]);
+
+    const result = await service.calculateTwinMatch('user-1', 'user-2');
+
+    expect(result).toEqual({
+      userId: 'user-2',
+      similarityScore: 57.74,
+      sharedParallelTypeIds: ['shared-1', 'shared-2'],
+    });
+
+    const saveResult = await service.saveTwinMatch('user-1', 'user-2');
+    expect(saveResult).toBeNull();
+    expect(prisma.twin.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userAId: 'user-1',
+        userBId: 'user-2',
+      },
+    });
+    expect(prisma.twin.upsert).not.toHaveBeenCalled();
+  });
+
+  it('reduces score below threshold when shared Parallels have substantially different strengths', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-1' },
+      { id: 'user-2' },
+    ]);
+
+    // Both users share 3 Parallels, but strengths differ by 60% on average (closeness = 0.40).
+    // Final score = 40.00% < 70%.
+    prisma.userParallel.findMany.mockResolvedValue([
+      { userId: 'user-1', parallelTypeId: 'p1', strengthPct: 90 },
+      { userId: 'user-1', parallelTypeId: 'p2', strengthPct: 80 },
+      { userId: 'user-1', parallelTypeId: 'p3', strengthPct: 85 },
+      { userId: 'user-2', parallelTypeId: 'p1', strengthPct: 20 },
+      { userId: 'user-2', parallelTypeId: 'p2', strengthPct: 30 },
+      { userId: 'user-2', parallelTypeId: 'p3', strengthPct: 25 },
+    ]);
+
+    const result = await service.calculateTwinMatch('user-1', 'user-2');
+
+    expect(result).toEqual({
+      userId: 'user-2',
+      similarityScore: 40,
+      sharedParallelTypeIds: ['p1', 'p2', 'p3'],
+    });
+
+    const saveResult = await service.saveTwinMatch('user-1', 'user-2');
+    expect(saveResult).toBeNull();
+    expect(prisma.twin.deleteMany).toHaveBeenCalled();
+  });
+
+  it('deletes stale Twin match when recalculation drops below threshold', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-z' },
+      { id: 'user-a' },
+    ]);
+
+    // Users now share only 1 parallel, so score is 0.
+    prisma.userParallel.findMany.mockResolvedValue([
+      { userId: 'user-z', parallelTypeId: 'builder', strengthPct: 80 },
+      { userId: 'user-a', parallelTypeId: 'builder', strengthPct: 80 },
+    ]);
+
+    const result = await service.saveTwinMatch('user-z', 'user-a');
+
+    expect(result).toBeNull();
+    expect(prisma.twin.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userAId: 'user-a',
+        userBId: 'user-z',
+      },
+    });
+    expect(prisma.twin.upsert).not.toHaveBeenCalled();
   });
 
   it('does not save a Twin match below the threshold', async () => {
@@ -392,8 +538,18 @@ describe('UsersService', () => {
         strengthPct: 80,
       },
       {
+        userId: '1',
+        parallelTypeId: 'gamer',
+        strengthPct: 80,
+      },
+      {
         userId: '2',
         parallelTypeId: 'builder',
+        strengthPct: 10,
+      },
+      {
+        userId: '2',
+        parallelTypeId: 'gamer',
         strengthPct: 10,
       },
     ]);
@@ -401,6 +557,12 @@ describe('UsersService', () => {
     const result = await service.saveTwinMatch('1', '2');
 
     expect(result).toBeNull();
+    expect(prisma.twin.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userAId: '1',
+        userBId: '2',
+      },
+    });
     expect(prisma.twin.upsert).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -80,6 +85,80 @@ export class AuthService {
     }
 
     await this.redis.set(`auth:revoked:${user.jti}`, '1', 'EX', remainingSeconds);
+  }
+
+  /**
+   * Verifies an access token string (signature, expiration, claims, revocation).
+   * Shared between HTTP strategies and WebSocket gateway handshakes.
+   */
+  async verifyToken(token: string): Promise<AuthenticatedUser> {
+    if (typeof token !== 'string' || token.trim().length === 0) {
+      throw new UnauthorizedException('Missing token');
+    }
+
+    let payload: { sub?: unknown; jti?: unknown; exp?: unknown };
+    try {
+      payload = await this.jwtService.verifyAsync(token);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TokenExpiredError') {
+        throw new UnauthorizedException('Token has expired');
+      }
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    return this.validateTokenPayload(payload);
+  }
+
+  /**
+   * Validates required token claims and checks Redis for revocation.
+   */
+  async validateTokenPayload(payload: {
+    sub?: unknown;
+    jti?: unknown;
+    exp?: unknown;
+  }): Promise<AuthenticatedUser> {
+    if (
+      typeof payload.sub !== 'string' ||
+      payload.sub.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.jti !== 'string' ||
+      payload.jti.trim().length === 0
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    if (
+      typeof payload.exp !== 'number' ||
+      !Number.isFinite(payload.exp)
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    try {
+      const revoked = await this.redis.exists(`auth:revoked:${payload.jti}`);
+
+      if (revoked === 1) {
+        throw new UnauthorizedException('Token has been revoked');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Authentication service is temporarily unavailable',
+      );
+    }
+
+    return {
+      id: payload.sub,
+      jti: payload.jti,
+      exp: payload.exp,
+    };
   }
 
   private buildAuthResult(user: User): AuthResult {

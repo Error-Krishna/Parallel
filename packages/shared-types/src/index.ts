@@ -71,6 +71,8 @@ export interface UserVisibleParallelDto {
 export interface PeopleDiscoveryDto {
   user: PublicUser;
   parallels: ParallelTypeDto[];
+  sharedParallels: ParallelTypeDto[];
+  explanation: string;
 }
 
 export interface ParallelMapResponse {
@@ -265,3 +267,41 @@ export interface NotificationsListResponse {
   nextCursor: string | null;
   unreadCount: number;
 }
+
+export type CollabStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+
+export interface CollabSessionDto {
+  id: string;
+  userAId: string;
+  userBId: string;
+  userA: PublicUser;
+  userB: PublicUser;
+  parallelTypeAId: string;
+  parallelTypeA: ParallelTypeDto;
+  parallelTypeBId: string | null;
+  parallelTypeB: ParallelTypeDto | null;
+  status: CollabStatus;
+  challengeTitle: string | null;
+  challengeDescription: string | null;
+  challengeContext: {
+    theme?: string;
+    category?: string;
+    [key: string]: unknown;
+  } | null;
+  userACompleted: boolean;
+  userBCompleted: boolean;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCollabDto {
+  targetUserId?: string;
+  toUsername?: string;
+  myParallelTypeId: string;
+}
+
+export interface AcceptCollabDto {
+  myParallelTypeId: string;
+}
+

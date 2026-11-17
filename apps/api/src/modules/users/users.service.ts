@@ -2,9 +2,12 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { User } from '@prisma/client';
+import type { AppConfig } from '../../config/configuration.js';
 import type {
   PublicUser,
   TwinMatchDto,
@@ -28,7 +31,23 @@ interface CreateUserInput {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly notifications?: NotificationsService,
+  ) {}
+
+  private getTwinConfig(): {
+    minimumIntersectionSize: number;
+    matchThreshold: number;
+  } {
+    const twinConfig = this.configService?.get<AppConfig>('app')?.twin;
+
+    return {
+      minimumIntersectionSize: twinConfig?.minimumIntersectionSize ?? 2,
+      matchThreshold: twinConfig?.matchThreshold ?? 70,
+    };
+  }
 
   async findByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({
@@ -251,11 +270,13 @@ export class UsersService {
         .map((parallel) => [parallel.parallelTypeId, parallel.strengthPct]),
     );
 
-    const sharedParallelTypeIds = [...userAScores.keys()].filter((id) =>
-      userBScores.has(id),
-    );
+    const sharedParallelTypeIds = [...userAScores.keys()]
+      .filter((id) => userBScores.has(id))
+      .sort();
 
-    if (sharedParallelTypeIds.length === 0) {
+    const { minimumIntersectionSize } = this.getTwinConfig();
+
+    if (sharedParallelTypeIds.length < minimumIntersectionSize) {
       return {
         userId: userBId,
         similarityScore: 0,
@@ -263,16 +284,31 @@ export class UsersService {
       };
     }
 
-    const totalMatch = sharedParallelTypeIds.reduce((sum, parallelTypeId) => {
-      const scoreA = userAScores.get(parallelTypeId)!;
-      const scoreB = userBScores.get(parallelTypeId)!;
-      const difference = Math.abs(scoreA - scoreB);
+    const totalCloseness = sharedParallelTypeIds.reduce(
+      (sum, parallelTypeId) => {
+        const scoreA = userAScores.get(parallelTypeId)!;
+        const scoreB = userBScores.get(parallelTypeId)!;
+        const difference = Math.abs(scoreA - scoreB);
 
-      return sum + (1 - difference / 100);
-    }, 0);
+        return sum + (1 - difference / 100);
+      },
+      0,
+    );
 
-    const similarityScore =
-      (totalMatch / sharedParallelTypeIds.length) * 100;
+    const strengthSimilarity =
+      totalCloseness / sharedParallelTypeIds.length;
+
+    const allDistinctParallelTypeIds = new Set([
+      ...userAScores.keys(),
+      ...userBScores.keys(),
+    ]);
+
+    const jaccard =
+      sharedParallelTypeIds.length / allDistinctParallelTypeIds.size;
+    const overlapFactor = (2 * jaccard) / (1 + jaccard);
+    const combinedScore =
+      strengthSimilarity * Math.sqrt(overlapFactor) * 100;
+    const similarityScore = Math.min(100, Math.max(0, combinedScore));
 
     return {
       userId: userBId,
@@ -282,8 +318,13 @@ export class UsersService {
   }
 
   async getTwinMatches(userId: string): Promise<TwinMatchDto[]> {
+    const { matchThreshold } = this.getTwinConfig();
+
     const twins = await this.prisma.twin.findMany({
       where: {
+        similarityScore: {
+          gte: matchThreshold,
+        },
         OR: [
           { userAId: userId },
           { userBId: userId },
@@ -414,12 +455,18 @@ export class UsersService {
     userBId: string,
   ): Promise<TwinMatch | null> {
     const match = await this.calculateTwinMatch(userAId, userBId);
+    const [userAIdSorted, userBIdSorted] = [userAId, userBId].sort();
+    const { matchThreshold } = this.getTwinConfig();
 
-    if (match.similarityScore < 70) {
+    if (match.similarityScore < matchThreshold) {
+      await this.prisma.twin.deleteMany({
+        where: {
+          userAId: userAIdSorted,
+          userBId: userBIdSorted,
+        },
+      });
       return null;
     }
-
-    const [userAIdSorted, userBIdSorted] = [userAId, userBId].sort();
 
     const existingTwin = this.notifications
       ? await this.prisma.twin.findUnique({

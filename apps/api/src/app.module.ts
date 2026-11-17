@@ -23,6 +23,8 @@ import { ParallelsModule } from './modules/parallels/parallels.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { CardsModule } from './modules/cards/cards.module.js';
 import { WrappedModule } from './modules/wrapped/wrapped.module.js';
+import { CollabModule } from './modules/collab/collab.module.js';
+import { EventsModule } from './websockets/events.module.js';
 
 @Module({
   imports: [
@@ -59,6 +61,8 @@ import { WrappedModule } from './modules/wrapped/wrapped.module.js';
     NotificationsModule,
     CardsModule,
     WrappedModule,
+    CollabModule,
+    EventsModule,
     // Feature modules land here as they're built (blueprint §16):
     // FeedModule, SocialModule, CommunitiesModule, EventsModule, WrappedModule,
     // CardsModule, NotificationsModule, AdminModule.

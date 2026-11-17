@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { SignalType } from '@prisma/client';
 import type {
   ContentItemDto,
-  PublicUser,
   PeopleDiscoveryDto,
   ParallelFeedResponse,
   ParallelMapResponse,
@@ -109,14 +108,31 @@ export class ParallelsService {
   ): Promise<PeopleDiscoveryDto[]> {
     const parallel = await this.prisma.parallelType.findUnique({
       where: { id: parallelId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
 
     if (!parallel) {
       throw new NotFoundException('Parallel not found');
     }
 
-    const users = await this.prisma.userParallel.findMany({
+    const myParallels = await this.prisma.userParallel.findMany({
+      where: {
+        userId,
+        isGhost: false,
+        isHidden: false,
+        dismissedAt: null,
+      },
+      select: {
+        parallelTypeId: true,
+        strengthPct: true,
+      },
+    });
+
+    const myParallelStrengths = new Map(
+      myParallels.map((p) => [p.parallelTypeId, p.strengthPct]),
+    );
+
+    const candidateRows = await this.prisma.userParallel.findMany({
       where: {
         parallelTypeId: parallelId,
         userId: { not: userId },
@@ -124,12 +140,11 @@ export class ParallelsService {
         isHidden: false,
         dismissedAt: null,
       },
-      orderBy: [
-        { strengthPct: 'desc' },
-        { discoveredAt: 'desc' },
-      ],
-      take: 20,
+      take: 50,
       select: {
+        userId: true,
+        strengthPct: true,
+        discoveredAt: true,
         user: {
           select: {
             id: true,
@@ -138,7 +153,6 @@ export class ParallelsService {
             bio: true,
             parallels: {
               where: {
-                parallelTypeId: { not: parallelId },
                 isGhost: false,
                 isHidden: false,
                 dismissedAt: null,
@@ -146,8 +160,8 @@ export class ParallelsService {
               orderBy: {
                 strengthPct: 'desc',
               },
-              take: 4,
               select: {
+                strengthPct: true,
                 parallelType: {
                   select: {
                     id: true,
@@ -163,16 +177,83 @@ export class ParallelsService {
       },
     });
 
-    return users.map(({ user }) => ({
-      user: {
-        id: user.id,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        bio: user.bio,
-      },
-      parallels: user.parallels.map(
-        ({ parallelType }) => parallelType,
-      ),
+    const evaluatedCandidates = candidateRows.map((row) => {
+      const candidateUser = row.user;
+      const candidateParallels = candidateUser.parallels;
+
+      const sharedParallels: ParallelTypeDto[] = [];
+      const nonSharedParallels: ParallelTypeDto[] = [];
+      let totalSharedStrength = 0;
+
+      for (const item of candidateParallels) {
+        const pType = item.parallelType;
+        if (myParallelStrengths.has(pType.id)) {
+          sharedParallels.push(pType);
+          const myStrength = myParallelStrengths.get(pType.id)!;
+          totalSharedStrength += (myStrength + item.strengthPct) / 2;
+        } else {
+          nonSharedParallels.push(pType);
+        }
+      }
+
+      const sharedCount = sharedParallels.length;
+      const averageSharedStrength =
+        sharedCount > 0 ? totalSharedStrength / sharedCount : 0;
+      const currentParallelStrength = row.strengthPct;
+
+      let explanation: string;
+      if (sharedCount >= 2) {
+        const names = sharedParallels.map((p) => p.name);
+        if (names.length === 2) {
+          explanation = `Both exploring ${names[0]} + ${names[1]}`;
+        } else {
+          explanation = `Both exploring ${names.slice(0, -1).join(' + ')} + ${names[names.length - 1]}`;
+        }
+      } else if (sharedCount === 1) {
+        explanation = `Both exploring ${sharedParallels[0].name}`;
+      } else {
+        explanation = `Active in ${parallel.name}`;
+      }
+
+      return {
+        user: {
+          id: candidateUser.id,
+          username: candidateUser.username,
+          avatarUrl: candidateUser.avatarUrl,
+          bio: candidateUser.bio,
+        },
+        parallels: nonSharedParallels.slice(0, 4),
+        sharedParallels,
+        explanation,
+        sharedCount,
+        averageSharedStrength,
+        currentParallelStrength,
+        discoveredAt: row.discoveredAt,
+      };
+    });
+
+    evaluatedCandidates.sort((a, b) => {
+      if (b.sharedCount !== a.sharedCount) {
+        return b.sharedCount - a.sharedCount;
+      }
+      if (b.averageSharedStrength !== a.averageSharedStrength) {
+        return b.averageSharedStrength - a.averageSharedStrength;
+      }
+      if (b.currentParallelStrength !== a.currentParallelStrength) {
+        return b.currentParallelStrength - a.currentParallelStrength;
+      }
+      const timeDiff = b.discoveredAt.getTime() - a.discoveredAt.getTime();
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+      return a.user.id.localeCompare(b.user.id);
+    });
+
+    return evaluatedCandidates.slice(0, 20).map(({ user, parallels, sharedParallels, explanation }) => ({
+      user,
+      parallels,
+      sharedParallels,
+      explanation,
     }));
   }
 

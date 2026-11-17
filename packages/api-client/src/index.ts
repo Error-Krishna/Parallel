@@ -30,6 +30,10 @@ import type {
   TwinMatchDto,
   UserVisibleParallelDto,
   PeopleDiscoveryDto,
+  CollabSessionDto,
+  CollabStatus,
+  CreateCollabDto,
+  AcceptCollabDto,
 } from '@parallel/shared-types';
 
 export function createParallelApi(http: AxiosInstance) {
@@ -312,6 +316,62 @@ export function createParallelApi(http: AxiosInstance) {
 
       skip: async (communityId: string): Promise<void> => {
         await http.post(`/v1/communities/${communityId}/skip`);
+      },
+    },
+    collab: {
+      invite: async (dto: CreateCollabDto): Promise<CollabSessionDto> => {
+        const { data } = await http.post<ApiResponse<CollabSessionDto>>(
+          '/v1/collab/invite',
+          dto,
+        );
+        return data.data;
+      },
+
+      accept: async (
+        sessionId: string,
+        dto: AcceptCollabDto,
+      ): Promise<CollabSessionDto> => {
+        const { data } = await http.post<ApiResponse<CollabSessionDto>>(
+          `/v1/collab/${sessionId}/accept`,
+          dto,
+        );
+        return data.data;
+      },
+
+      cancel: async (sessionId: string): Promise<CollabSessionDto> => {
+        const { data } = await http.post<ApiResponse<CollabSessionDto>>(
+          `/v1/collab/${sessionId}/cancel`,
+        );
+        return data.data;
+      },
+
+      decline: async (sessionId: string): Promise<CollabSessionDto> => {
+        const { data } = await http.post<ApiResponse<CollabSessionDto>>(
+          `/v1/collab/${sessionId}/decline`,
+        );
+        return data.data;
+      },
+
+      complete: async (sessionId: string): Promise<CollabSessionDto> => {
+        const { data } = await http.post<ApiResponse<CollabSessionDto>>(
+          `/v1/collab/${sessionId}/complete`,
+        );
+        return data.data;
+      },
+
+      getSessions: async (status?: CollabStatus): Promise<CollabSessionDto[]> => {
+        const { data } = await http.get<ApiResponse<CollabSessionDto[]>>(
+          '/v1/collab/sessions',
+          { params: status ? { status } : undefined },
+        );
+        return data.data;
+      },
+
+      getSession: async (sessionId: string): Promise<CollabSessionDto> => {
+        const { data } = await http.get<ApiResponse<CollabSessionDto>>(
+          `/v1/collab/sessions/${sessionId}`,
+        );
+        return data.data;
       },
     },
     cards: {
