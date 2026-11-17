@@ -15,12 +15,18 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../../common/decorators/current-user.decorator.js';
+import {
+  RateLimit,
+  RedisRateLimitGuard,
+} from '../../common/guards/rate-limit.guard.js';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('signup')
+  @UseGuards(RedisRateLimitGuard)
+  @RateLimit({ limit: 30, windowSeconds: 60, keyPrefix: 'auth:signup' })
   async signup(@Body() dto: SignupDto) {
     const result = await this.authService.signup(dto);
     return apiResponse(result, 'Account created successfully');
@@ -28,6 +34,8 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RedisRateLimitGuard)
+  @RateLimit({ limit: 10, windowSeconds: 60, keyPrefix: 'auth:login' })
   async login(@Body() dto: LoginDto) {
     const result = await this.authService.login(dto);
     return apiResponse(result, 'Login successful');
