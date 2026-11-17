@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Network, Sparkles, UserCircle, Users } from 'lucide-react';
+import { Network, Sparkles, UserCircle, Users } from 'lucide-react';
 import type {
   ParallelEvolutionDto,
   ParallelMapResponse,
@@ -11,6 +11,7 @@ import type {
   UserParallelDto,
 } from '@parallel/shared-types';
 import { api } from '@/lib/api-client';
+import { ParallelCard } from '@/features/parallels/parallel-card';
 import { getParallelColor, ParallelIcon } from '@/features/parallels/parallel-visuals';
 
 export default function MapPage() {
@@ -185,6 +186,26 @@ export default function MapPage() {
                   parallel={parallel}
                   index={index}
                   onEnter={(parallelId) => router.push(`/parallel/${parallelId}`)}
+                  onPublished={(updatedParallel) => {
+                    setMap((current) =>
+                      current
+                        ? {
+                            ...current,
+                            parallels: current.parallels.map((item) =>
+                              item.id === updatedParallel.id
+                                ? updatedParallel
+                                : item,
+                            ),
+                          }
+                        : current,
+                    );
+                    void api.users
+                      .getTwins()
+                      .then((nextTwins) => setTwins(nextTwins))
+                      .catch(() => {
+                        // Twins refresh is best-effort; publication already succeeded.
+                      });
+                  }}
                   onHide={(parallelId) => {
                     setMap((current) =>
                       current
@@ -500,108 +521,5 @@ export default function MapPage() {
         </section>
       </div>
     </main>
-  );
-}
-
-function ParallelCard({
-  parallel,
-  index,
-  onEnter,
-  onHide,
-}: {
-  parallel: UserParallelDto;
-  index: number;
-  onEnter: (parallelId: string) => void;
-  onHide: (parallelId: string) => void;
-}) {
-  async function handleEnter() {
-    try {
-      const enteredParallel = await api.parallels.enter(
-        parallel.parallelType.id,
-      );
-      onEnter(enteredParallel.id);
-    } catch (err) {
-      console.error('Could not enter Parallel:', err);
-    }
-  }
-
-  async function handleHide() {
-    try {
-      await api.parallels.hide(parallel.id);
-      onHide(parallel.id);
-    } catch (err) {
-      console.error('Could not hide Parallel:', err);
-    }
-  }
-  const color = getParallelColor(parallel.parallelType.name);
-
-  return (
-    <motion.article
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.08 }}
-      className="group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-foreground/20"
-    >
-      <div
-        className="absolute -right-16 -top-16 h-40 w-40 rounded-full opacity-10 blur-3xl"
-        style={{ backgroundColor: color }}
-      />
-
-      <div className="relative">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-border"
-              style={{ color }}
-            >
-              <ParallelIcon iconName={parallel.parallelType.icon ?? ""} className="h-5 w-5" />
-            </div>
-
-            {parallel.isGhost && (
-              <span className="rounded-full border border-border px-2.5 py-1 text-[10px] font-medium tracking-wider text-muted-foreground">
-                NEW DISCOVERY
-              </span>
-            )}
-          </div>
-
-          <span className="font-mono text-2xl font-semibold" style={{ color }}>
-            {Math.round(parallel.strengthPct)}%
-          </span>
-        </div>
-
-        <h4 className="mt-8 text-2xl font-semibold">
-          {parallel.parallelType.name}
-        </h4>
-
-        <p className="mt-2 max-w-md leading-7 text-muted-foreground">
-          {parallel.parallelType.description}
-        </p>
-
-        <p className="mt-4 text-xs text-muted-foreground">
-          {parallel.suggestionReason ?? 'A direction worth exploring.'}
-        </p>
-
-        <div className="mt-8 flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => void handleEnter()}
-            className="inline-flex items-center gap-2 text-sm font-medium transition group-hover:gap-3"
-          >
-            Enter Parallel
-            <ArrowRight className="h-4 w-4" />
-          </button>
-
-          {parallel.isGhost && (
-            <button
-              type="button"
-              onClick={() => void handleHide()}
-              className="text-sm text-muted-foreground transition hover:text-foreground"
-            >
-              Hide
-            </button>
-          )}
-        </div>
-      </div>
-    </motion.article>
   );
 }
